@@ -1,35 +1,27 @@
-import sys
-import ctypes
-
 import cv2
 import numpy as np
-import pyautogui
-import win32con
 import win32gui
 from PIL import Image, ImageGrab
 from PyQt5.QtCore import Qt, QEasingCurve, QTimer
 from PyQt5.QtGui import QImage, QPixmap
-from PyQt5.QtWidgets import (
-    QApplication, QFrame, QScrollArea, QSizePolicy,
-    QVBoxLayout, QWidget
-)
+import time
+from PyQt5.QtWidgets import QFrame
 from qfluentwidgets import (
-    BodyLabel, CaptionLabel, FluentWindow, ImageLabel,
-    PrimaryPushButton, PushButton, ScrollArea,
-    SingleDirectionScrollArea, SmoothScrollArea,
-    TextBrowser, ToolTipFilter, SwitchButton
+    BodyLabel, CaptionLabel, ImageLabel,
+    PrimaryPushButton, ScrollArea,
+    TextBrowser, SwitchButton, ComboBox
 )
-from qfluentwidgets import FlowLayout, HorizontalPipsPager, PixmapLabel
-from qfluentwidgets import PipsScrollButtonDisplayMode, VerticalPipsPager
+from qfluentwidgets import FlowLayout
 
 from log import SnakeLogger
 from snake_analyzer import SnakeAnalyzer
+from qfluentwidgets import TransparentDropDownPushButton, RoundMenu, Action, FluentIcon, setFont
 
 
-class GameWidget(QFrame):
+class SnakeGameCard(QFrame):
     def __init__(self, parent=None):
         super().__init__(parent)
-        self.setObjectName('GameWidget')
+        self.setObjectName('SnakeGameCard')
 
         layout = FlowLayout(self, needAni=True)
 
@@ -68,6 +60,15 @@ class GameWidget(QFrame):
         self.btn_show_analysis.setChecked(True)
         self.btn_show_analysis.checkedChanged.connect(self.onAnalysisToggled)
 
+        # 画面刷新开关
+        self.btn_show_screen = SwitchButton(parent=self)
+        self.btn_show_screen.setChecked(True)
+        self.btn_show_screen.setText('开启画面刷新')
+        self.btn_show_screen.checkedChanged.connect(self.onScreenToggled)
+
+        # 日志等级选择下拉菜单
+        self.log_level_button = self.createLogLevelButton()
+
         # 状态显示区域
         self.status_label = CaptionLabel("状态: 等待开始运行")
         self.status_label.setAlignment(Qt.AlignCenter)
@@ -86,6 +87,8 @@ class GameWidget(QFrame):
         layout.addWidget(self.btn_start)
         layout.addWidget(self.btn_stop)
         layout.addWidget(self.btn_show_analysis)
+        layout.addWidget(self.btn_show_screen)
+        layout.addWidget(self.log_level_button)
         layout.addWidget(self.log_text)
         layout.addWidget(self.status_label)
         layout.addWidget(self.game_state_label)
@@ -126,11 +129,17 @@ class GameWidget(QFrame):
                 # 检查窗口是否在最前
                 if win32gui.GetForegroundWindow() == hwnd:
                     try:
+                        # 性能计时 - 开始
+                        start_time = time.time()
+                        
                         # 将 PIL Image 转换为 OpenCV 格式 (NumPy 数组)
                         screen_cv = cv2.cvtColor(np.array(screen), cv2.COLOR_RGB2BGR)
+                        convert_time = time.time() - start_time
 
                         # 调用 SnakeAnalyzer 的 analyze_frame 方法
+                        analyze_start = time.time()
                         game_state, path, special_cells = self.snake_analyzer.analyze_frame(screen_cv)
+                        analyze_time = time.time() - analyze_start
 
                         # 更新 UI 上的状态标签
                         self.game_state_label.setText(f"当前状态: {game_state}")
@@ -143,22 +152,33 @@ class GameWidget(QFrame):
                             cell_h = h / grid_h
                             cell_w = w / grid_w
 
-                            # 绘制网格线
-                            for i in range(grid_h + 1):
-                                y = int(i * cell_h)
-                                cv2.line(screen_cv, (0, y), (w, y), (255, 255, 255), 1)  # 白色横线
-                            for j in range(grid_w + 1):
-                                x = int(j * cell_w)
-                                cv2.line(screen_cv, (x, 0), (x, h), (255, 255, 255), 1)  # 白色竖线
+                            # # 绘制网格线
+                            # for i in range(grid_h + 1):
+                            #     y = int(i * cell_h)
+                            #     cv2.line(screen_cv, (0, y), (w, y), (255, 255, 255), 1)  # 白色横线
+                            # for j in range(grid_w + 1):
+                            #     x = int(j * cell_w)
+                            #     cv2.line(screen_cv, (x, 0), (x, h), (255, 255, 255), 1)  # 白色竖线
 
                             # 绘制路径
                             if path and len(path) > 1:
+                                # 绘制路径起始点（绿色大圆）
+                                start_x = int(path[0][0] * cell_w + cell_w / 2)
+                                start_y = int(path[0][1] * cell_h + cell_h / 2)
+                                cv2.circle(screen_cv, (start_x, start_y), 8, (0, 255, 0), -1)  # 绿色起始点
+                                
+                                # 绘制路径线段
                                 for i in range(len(path)-1):
                                     start_x = int(path[i][0] * cell_w + cell_w / 2)
                                     start_y = int(path[i][1] * cell_h + cell_h / 2)
                                     end_x = int(path[i+1][0] * cell_w + cell_w / 2)
                                     end_y = int(path[i+1][1] * cell_h + cell_h / 2)
-                                    cv2.line(screen_cv, (start_x, start_y), (end_x, end_y), (255, 0, 0), 2)  # 蓝色路径
+                                    cv2.arrowedLine(screen_cv, (start_x, start_y), (end_x, end_y), (255, 0, 0), 2, tipLength=0.3)  # 带箭头的蓝色路径
+                                
+                                # 绘制路径终点（红色大圆）
+                                end_x = int(path[-1][0] * cell_w + cell_w / 2)
+                                end_y = int(path[-1][1] * cell_h + cell_h / 2)
+                                cv2.circle(screen_cv, (end_x, end_y), 8, (0, 0, 255), -1)  # 红色终点
 
                             # 绘制特殊格子和中心点
                             for (x, y), cell_type in special_cells.items():
@@ -184,13 +204,19 @@ class GameWidget(QFrame):
                                 else:
                                     continue
                                 
-                                cv2.rectangle(screen_cv, (left, top), (right, bottom), color, 2)
+                                # cv2.rectangle(screen_cv, (left, top), (right, bottom), color, 2)
                                 cv2.circle(screen_cv, (center_x, center_y), 4, color, -1)  # 在格子中心绘制实心圆点
 
+                        # 性能计时 - 绘制
+                        draw_start = time.time()
                         # 将处理后的图像转换回RGB格式
                         screen_cv = cv2.cvtColor(screen_cv, cv2.COLOR_BGR2RGB)
                         # 将OpenCV图像转换回PIL格式
                         screen = Image.fromarray(screen_cv)
+                        draw_time = time.time() - draw_start
+
+                        # 记录性能数据
+                        self.logger.log(f"性能统计 - 图像转换: {convert_time:.3f}s, 分析: {analyze_time:.3f}s, 绘制: {draw_time:.3f}s")
 
                     except Exception as e:
                         self.status_label.setText(f"分析图像错误: {str(e)}")
@@ -228,6 +254,12 @@ class GameWidget(QFrame):
             # 更新按钮状态
             self.btn_start.setEnabled(False)
             self.btn_stop.setEnabled(True)
+            
+            # 添加演示定时器并立即执行
+            demo_timer = QTimer(self)
+            demo_timer.setSingleShot(True)
+            demo_timer.timeout.connect(lambda: self.window().adjustSize())
+            demo_timer.start(1000)  # 立即执行
         else:
             self.status_label.setText("状态: 未找到'绝区零'窗口")
 
@@ -245,6 +277,23 @@ class GameWidget(QFrame):
         text = '开启分析' if isChecked else '关闭分析'
         self.btn_show_analysis.setText(text)
 
+    def onScreenToggled(self, isChecked: bool):
+        """处理画面刷新开关的状态变化"""
+        text = '开启画面刷新' if isChecked else '关闭画面刷新'
+        self.btn_show_screen.setText(text)
+
+    def onLogLevelChanged(self, level: str):
+        """处理日志等级变化"""
+        level_map = {
+            'DEBUG': logging.DEBUG,
+            'INFO': logging.INFO,
+            'WARNING': logging.WARNING,
+            'ERROR': logging.ERROR,
+            'CRITICAL': logging.CRITICAL
+        }
+        self.logger.set_level(level_map[level])
+        self.log_level_button.setText(f'日志等级: {level}')
+
     def select_window(self):
         """选择要捕获的窗口"""
         # 自动查找标题为'绝区零'的窗口
@@ -255,44 +304,19 @@ class GameWidget(QFrame):
         else:
             self.status_label.setText("状态: 未找到'绝区零'窗口")
 
-        QTimer.singleShot(150, lambda: self.window().adjustSize())
+    def createLogLevelButton(self):
+        """创建日志等级选择按钮"""
+        button = TransparentDropDownPushButton('日志等级: INFO', self, FluentIcon.LIBRARY)
+        button.setFixedHeight(34)
+        setFont(button, 12)
 
-
-class SnakeGUI(FluentWindow):
-    def __init__(self):
-        super().__init__()
-        self.setWindowTitle("蛇吃蛇控制器")
-
-        # 创建主部件
-        self.game_widget = GameWidget()
-        self.addSubInterface(self.game_widget, 'game', '游戏控制')
-
-        # 初始化导航栏
-        self.navigationInterface.setExpandWidth(200)
-        self.setMinimumSize(600, 600)
-
-
-def is_admin():
-    try:
-        return ctypes.windll.shell32.IsUserAnAdmin()
-    except:
-        return False
-
-
-
-
-
-if __name__ == "__main__":
-    if not is_admin():
-        # 确保完全无控制台
-        ctypes.windll.kernel32.FreeConsole()
-        # 使用pythonw.exe路径重新运行
-        pythonw_path = sys.executable.replace('python.exe', 'pythonw.exe')
-        ctypes.windll.shell32.ShellExecuteW(None, "runas", pythonw_path, " ".join(sys.argv), None, 1)
-        sys.exit()
-    
-    # 正常启动程序
-    app = QApplication(sys.argv)
-    window = SnakeGUI()
-    window.show()
-    sys.exit(app.exec_())
+        menu = RoundMenu(parent=self)
+        menu.addActions([
+            Action(FluentIcon.LIBRARY, 'DEBUG', triggered=lambda: self.onLogLevelChanged('DEBUG')),
+            Action(FluentIcon.LIBRARY, 'INFO', triggered=lambda: self.onLogLevelChanged('INFO')),
+            Action(FluentIcon.LIBRARY, 'WARNING', triggered=lambda: self.onLogLevelChanged('WARNING')),
+            Action(FluentIcon.LIBRARY, 'ERROR', triggered=lambda: self.onLogLevelChanged('ERROR')),
+            Action(FluentIcon.LIBRARY, 'CRITICAL', triggered=lambda: self.onLogLevelChanged('CRITICAL')),
+        ])
+        button.setMenu(menu)
+        return button

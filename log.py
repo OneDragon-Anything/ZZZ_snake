@@ -18,6 +18,7 @@ class SnakeLogger(QObject):
 
         # 创建内存处理器，用于临时存储日志
         self.memory_handler = MemoryHandler(capacity=100, flushLevel=logging.INFO)
+        self.logger.addHandler(self.memory_handler)
 
         # 创建格式化器
         formatter = logging.Formatter('%(asctime)s - %(levelname)s - %(message)s')
@@ -42,7 +43,7 @@ class SnakeLogger(QObject):
         # 如果设置了文本框，通过信号更新文本框内容
         if self.text_widget:
             # 发送信号到主线程更新UI
-            self.signals.log_signal.emit(message)
+            self.signals.log_signal.emit(f"[{logging.getLevelName(level)}] {message}")
     
     def _update_text_widget(self, message):
         """在主线程中更新文本框内容"""
@@ -64,6 +65,14 @@ class SnakeLogger(QObject):
         :param text_widget: 文本框部件
         """
         self.text_widget = text_widget
+
+    def set_level(self, level):
+        """
+        设置日志级别
+        :param level: 日志级别
+        """
+        self.logger.setLevel(level)
+        self.memory_handler.setLevel(level)
 
     def clear_logs(self):
         """

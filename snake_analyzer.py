@@ -81,6 +81,7 @@ class SnakeAnalyzer:
         previous_state = self.game_state
         path = []
         special_cells = {}
+        self.current_head_pos = None  # 添加当前蛇头位置记录
 
         if self.is_game_over(frame):
             self.game_state = "game_over"
@@ -103,23 +104,38 @@ class SnakeAnalyzer:
                     cell = board_state[y][x]
                     if cell in ['food', 'obstacle', 'own_head', 'own_body', 'enemy_head', 'enemy_body', 'speed_boost', 'score_boost']:
                         special_cells[(x, y)] = cell
+                        if cell == 'own_head':
+                            self.current_head_pos = (x, y)
 
             # 获取计划路径
             next_direction = self.determine_next_move(board_state)
-            if next_direction:
-                # 从蛇头位置开始计算路径
-                head_pos = None
-                for y in range(len(board_state)):
-                    for x in range(len(board_state[y])):
-                        if board_state[y][x] == 'own_head':
-                            head_pos = (x, y)
-                            break
-                    if head_pos:
-                        break
+            if next_direction and self.current_head_pos:
+                path = self.calculate_path(board_state, self.current_head_pos, next_direction)
                 
-                if head_pos:
-                    path = self.calculate_path(board_state, head_pos, next_direction)
-
+                if path and len(path) > 1:
+                    # 在路径中找到当前蛇头位置的索引
+                    head_index = -1
+                    for i, pos in enumerate(path):
+                        if pos == self.current_head_pos:
+                            head_index = i
+                            break
+                    
+                    # 根据蛇头在路径中的位置决定移动方向
+                    if head_index != -1 and head_index + 1 < len(path):
+                        next_pos = path[head_index + 1]
+                        dx = next_pos[0] - self.current_head_pos[0]
+                        dy = next_pos[1] - self.current_head_pos[1]
+                        
+                        # 根据位置差确定方向
+                        if dx > 0:
+                            next_direction = 'd'
+                        elif dx < 0:
+                            next_direction = 'a'
+                        elif dy > 0:
+                            next_direction = 's'
+                        elif dy < 0:
+                            next_direction = 'w'
+                
                 # 控制蛇的移动
                 if not hasattr(self, 'last_press_time') or current_time - self.last_press_time > 1:
                     if next_direction:
@@ -144,9 +160,23 @@ class SnakeAnalyzer:
         根据当前方向和游戏状态计算实际路径
         使用与AI决策一致的路径规划逻辑
         """
-        # 首先将坐标从(x,y)转换为(row,col)格式，因为board_state是按行列存储的
+        # 确保start_pos是蛇头位置
+        head_found = False
+        for r in range(len(board_state)):
+            for c in range(len(board_state[r])):
+                if board_state[r][c] == 'own_head':
+                    start_pos = (c, r)  # 使用实际的蛇头位置
+                    head_found = True
+                    break
+            if head_found:
+                break
+                
+        if not head_found:
+            self.logger.log("警告：未找到蛇头位置！")
+            return [start_pos]  # 返回原始位置
+            
+        # 将坐标从(x,y)转换为(row,col)格式
         start_row, start_col = start_pos[1], start_pos[0]
-        head_pos = (start_row, start_col)
         
         # 找到所有奖励的位置
         rewards = []
@@ -259,7 +289,106 @@ class SnakeAnalyzer:
                     self.logger.log(f"预测路径将撞墙！位置: ({x}, {y})")
                     break
         
-        return path
+        # 优化路径，消除无效的往返移动
+        optimized_path = self.optimize_path(path)
+        
+        return optimized_path
+        
+    def optimize_path(self, path):
+        """
+        优化路径，消除无效的往返移动和冗余移动
+        """
+        if len(path) <= 2:
+            return path
+            
+        # 创建一个新的优化路径，初始包含起点
+        optimized = [path[0]]
+        
+        # 遍历路径中的每个点
+        i = 1
+        while i < len(path):
+            current = path[i]
+            
+            # 检查是否存在往返移动
+            # 如果当前点不是最后一个点，且下一个点会导致往返
+            if i + 1 < len(path):
+                next_point = path[i + 1]
+                
+                # 如果optimized中至少有一个点，检查是否会形成往返
+                if len(optimized) > 0:
+                    last_point = optimized[-1]
+                    
+                    # 检查是否形成往返模式：A->B->A
+                    if next_point == last_point:
+                        # 跳过当前点和下一个点，直接移动到下一个有效点
+                        i += 2
+                        continue
+            
+            # 检查是否存在冗余移动（例如：从起点向左再向右，可以直接向右）
+            # 如果当前路径长度至少为3，检查是否可以直接从起点到达目标点
+            if len(optimized) >= 1 and i + 1 < len(path):
+                start_point = optimized[-1]  # 最后添加的点
+                end_point = path[i + 1]      # 下下个点
+                
+                # 计算从起点到当前点的向量
+                vec1_x = current[0] - start_point[0]
+                vec1_y = current[1] - start_point[1]
+                
+                # 计算从当前点到下一个点的向量
+                vec2_x = end_point[0] - current[0]
+                vec2_y = end_point[1] - current[1]
+                
+                # 检查两个向量是否方向相反（点积为负）
+                dot_product = vec1_x * vec2_x + vec1_y * vec2_y
+                
+                # 如果向量方向相反，说明存在往返移动
+                if dot_product < 0:
+                    # 检查是否可以直接从起点到达终点
+                    direct_x = end_point[0] - start_point[0]
+                    direct_y = end_point[1] - start_point[1]
+                    
+                    # 如果直接路径是可行的（曼哈顿距离等于向量长度），跳过中间点
+                    if abs(direct_x) + abs(direct_y) == abs(vec1_x) + abs(vec1_y) + abs(vec2_x) + abs(vec2_y):
+                        # 跳过当前点，直接添加终点
+                        optimized.append(end_point)
+                        i += 2
+                        continue
+                        
+            # 如果没有检测到往返或冗余，添加当前点到优化路径
+            optimized.append(current)
+            i += 1
+            
+        # 如果优化后路径为空，至少保留原始路径的起点
+        if not optimized and path:
+            optimized.append(path[0])
+            
+        # 最后再检查一遍整个路径，确保没有冗余移动
+        if len(optimized) >= 3:
+            final_optimized = [optimized[0]]
+            for j in range(1, len(optimized) - 1):
+                prev_point = final_optimized[-1]
+                current_point = optimized[j]
+                next_point = optimized[j + 1]
+                
+                # 检查是否可以直接从prev_point到next_point
+                # 计算向量
+                vec1_x = current_point[0] - prev_point[0]
+                vec1_y = current_point[1] - prev_point[1]
+                vec2_x = next_point[0] - current_point[0]
+                vec2_y = next_point[1] - current_point[1]
+                
+                # 如果两个向量方向相同（点积为正）且在同一直线上，可以跳过中间点
+                if (vec1_x * vec2_x + vec1_y * vec2_y > 0) and \
+                   ((vec1_x == 0 and vec2_x == 0) or (vec1_y == 0 and vec2_y == 0)):
+                    continue
+                
+                final_optimized.append(current_point)
+            
+            # 添加最后一个点
+            final_optimized.append(optimized[-1])
+            return final_optimized
+            
+        return optimized
 
     def click_window_center(self):
         """点击游戏窗口中心区域"""
@@ -334,8 +463,6 @@ class SnakeAnalyzer:
         frame_height, frame_width, _ = frame.shape
         cell_size_height = frame_height / grid_height
         cell_size_width = frame_width / grid_width
-        # 假设格子是正方形，取较小的尺寸作为 cell_size
-        cell_size = min(cell_size_height, cell_size_width)
 
         board = [[None for _ in range(grid_width)] for _ in range(grid_height)]
 
@@ -353,13 +480,16 @@ class SnakeAnalyzer:
         # 在 analyze_board 方法中新增颜色检测逻辑
         for r in range(grid_height):
             for c in range(grid_width):
+
+                if board[r][c] is not None:
+                    break
                 # 计算当前格子的像素坐标
-                x = int(c * cell_size)
-                y = int(r * cell_size)
+                x = int(c * cell_size_height)
+                y = int(r * cell_size_width)
                 # 检查是否在边缘区域    
                 # 为了更准确地获取格子的颜色，我们可以取格子中心点的颜色
-                center_x = int(c * cell_size + cell_size / 2)
-                center_y = int(r * cell_size + cell_size / 2)
+                center_x = int(c * cell_size_height + cell_size_height / 2)
+                center_y = int(r * cell_size_width + cell_size_width / 2)
 
                 # 获取中心像素的 HSV 值
                 # 确保中心坐标在图像边界内
@@ -371,6 +501,8 @@ class SnakeAnalyzer:
                 found = False
                 # 检查蛇头 (处理边框)
                 head_detected = False
+
+                
                 for i in range(-1, 2):
                     for j in range(-1, 2):
                         check_center_x = center_x + j
@@ -378,10 +510,23 @@ class SnakeAnalyzer:
                         if 0 <= check_center_y < frame_height and 0 <= check_center_x < frame_width:
                             hue_check = hsv_frame[check_center_y, check_center_x, 0]
                             if hue_check == own_head_hue:
-                                board[r][c] = "own_head"
+                                board[r][c] = "own_body"  #后面会设置own_head
                                 #self.logger.log(f"我方蛇头坐标: ({r}, {c})")
                                 head_detected = True
                                 found = True
+
+                                # 取长边
+                                cell_size = max(cell_size_height, cell_size_width)
+                                own_head_x, own_head_y = self.find_similar_color_center(
+                                    hsv_frame, 
+                                    check_center_x, 
+                                    check_center_y, 
+                                    int(2 * cell_size), 
+                                    0
+                                )
+                                snx = int(own_head_x // cell_size_width)
+                                sny = int(own_head_y // cell_size_height)
+                                board[sny][snx] = "own_head"
                                 break
                     if head_detected:
                         break
@@ -448,8 +593,8 @@ class SnakeAnalyzer:
             for dr, dc in moves:
                 nr, nc = r + dr, c + dc
 
-                # 检查是否在棋盘边界内
-                if 0 <= nr < rows and 0 <= nc < cols and board_state[nr][nc] not in ["own_body"]:
+                # 检查是否在棋盘边界内且不会碰到任何障碍物（包括自身和敌人）
+                if 0 <= nr < rows and 0 <= nc < cols and board_state[nr][nc] not in ["own_body", "enemy_body", "enemy_head"]:
                     neighbor = (nr, nc)
                     if neighbor not in visited:
                         # 检查是否是边缘格子（更严格的边界检查）
@@ -500,8 +645,8 @@ class SnakeAnalyzer:
                 for dr, dc in moves:
                     nr, nc = r + dr, c + dc
                     
-                    # 只检查基本边界和障碍物
-                    if 0 <= nr < rows and 0 <= nc < cols and board_state[nr][nc] not in ["own_body"]:
+                    # 只检查基本边界和所有障碍物（包括自身和敌人）
+                    if 0 <= nr < rows and 0 <= nc < cols and board_state[nr][nc] not in ["own_body", "enemy_body", "enemy_head"]:
                         neighbor = (nr, nc)
                         if neighbor not in visited:
                             visited.add(neighbor)
@@ -776,32 +921,47 @@ class SnakeAnalyzer:
             self.logger.log("找不到任何安全的移动方向！")
             return None
 
-if __name__ == '__main__':
-    from log import SnakeLogger  # 确保这里导入 SnakeLogger
-    import time
+    # 分析蛇头位置，返回分析后的蛇头坐标
+    def find_similar_color_center(self, hsv_frame, center_x, center_y, side_length, hue_tolerance=0):
+        """
+        以给定坐标为中心，在指定范围内检测同色调像素，并计算它们的中心坐标。
 
-    logger = SnakeLogger()
-    analyzer = SnakeAnalyzer(logger)
+        Args:
+            hsv_frame: 要检测的HSV格式图像
+            center_x: 起始坐标的 x 值.
+            center_y: 起始坐标的 y 值.
+            side_length: 检测范围的边长.
+            hue_tolerance: 色调的允许误差范围.
 
-    try:
-        frame = cv2.imread("image_f1f241.jpg") # 尝试加载你上传的截图
-        if frame is None:
-            print("无法加载图像 'image_f1f241.jpg'，请确保文件存在于当前目录下。")
+        Returns:
+            同色调像素的中心坐标 (x, y)，如果没有找到则返回 None.
+        """
+        frame_height, frame_width = hsv_frame.shape[:2]
+
+        # 1. 获取起始坐标色调
+        initial_hue = hsv_frame[center_y, center_x, 0]
+
+        # 2. 确定检测范围
+        start_x = max(0, center_x - side_length // 2)
+        end_x = min(frame_width, center_x + side_length // 2)
+        start_y = max(0, center_y - side_length // 2)
+        end_y = min(frame_height, center_y + side_length // 2)
+
+        similar_pixels = []
+
+        # 3. 检测同色调像素
+        for y in range(start_y, end_y):
+            for x in range(start_x, end_x):
+                hue = hsv_frame[y, x, 0]
+                if abs(int(hue) - int(initial_hue)) <= hue_tolerance:
+                    similar_pixels.append((x, y))
+
+        # 4. 计算中心坐标
+        if similar_pixels:
+            x_coords = [p[0] for p in similar_pixels]
+            y_coords = [p[1] for p in similar_pixels]
+            avg_x = np.mean(x_coords)
+            avg_y = np.mean(y_coords)
+            return avg_x, avg_y
         else:
-            game_state = analyzer.analyze_frame(frame)
-            print(f"当前游戏状态: {game_state}")
-
-            if game_state == "running":
-                board_state = analyzer.analyze_board(frame)
-                # 打印棋盘状态 (仅为演示)
-                for row in board_state:
-                    print(row)
-
-                # 示例如何控制蛇 (你需要根据你的逻辑来决定何时以及按哪个键)
-                # 在这里可以取消注释并根据需要调用 control_snake
-                # 例如：
-                # if analyzer.snake_direction:
-                #     analyzer.control_snake(analyzer.snake_direction)
-
-    except Exception as e:
-        print(f"发生错误: {e}")
+            return None
