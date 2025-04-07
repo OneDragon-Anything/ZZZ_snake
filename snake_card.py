@@ -5,16 +5,20 @@ from PIL import Image, ImageGrab
 from PyQt5.QtCore import Qt, QEasingCurve, QTimer
 from PyQt5.QtGui import QImage, QPixmap
 import time
-from PyQt5.QtWidgets import QFrame
+from PyQt5.QtWidgets import QFrame, QHBoxLayout
 from qfluentwidgets import (
     BodyLabel, CaptionLabel, ImageLabel,
     PrimaryPushButton, ScrollArea,
-    TextBrowser, SwitchButton, ComboBox
+    TextBrowser, SwitchButton, ComboBox,
+    InfoBadge
 )
 from qfluentwidgets import FlowLayout
 
 from log import SnakeLogger
-from snake_analyzer import SnakeAnalyzer
+from image_analyzer import ImageAnalyzer
+from path_calculator import PathCalculator
+from snake_controller import SnakeController
+from map_drawer import MapDrawer
 from qfluentwidgets import TransparentDropDownPushButton, RoundMenu, Action, FluentIcon, setFont
 
 
@@ -65,9 +69,15 @@ class SnakeGameCard(QFrame):
         self.btn_show_screen.setChecked(True)
         self.btn_show_screen.setText('开启画面刷新')
         self.btn_show_screen.checkedChanged.connect(self.onScreenToggled)
+        
+        # 路径计算频率控制
+        self.path_calc_label = CaptionLabel("路径计算频率:")
+        self.path_calc_combo = ComboBox()
+        self.path_calc_combo.addItems(["高 (每帧)", "中 (100ms)", "低 (200ms)"])
+        self.path_calc_combo.setCurrentIndex(1)  # 默认选择中等频率
+        self.path_calc_combo.currentIndexChanged.connect(self.onPathCalcFrequencyChanged)
 
-        # 日志等级选择下拉菜单
-        self.log_level_button = self.createLogLevelButton()
+
 
         # 状态显示区域
         self.status_label = CaptionLabel("状态: 等待开始运行")
@@ -83,12 +93,35 @@ class SnakeGameCard(QFrame):
         self.game_state_label = BodyLabel("当前状态: 初始化")  # 初始状态
         self.game_state_label.setAlignment(Qt.AlignCenter)
 
+        # 添加性能计时显示栏
+        self.performance_layout = QHBoxLayout()
+        self.convert_time_badge = InfoBadge.custom("图像转换: 0.000s", "#0066cc", "#ffffff")
+        self.analyze_time_badge = InfoBadge.custom("棋盘分析: 0.000s", "#00cc66", "#ffffff")
+        self.path_calc_time_badge = InfoBadge.custom("路径计算: 0.000s", "#ffcc00", "#000000")
+        self.draw_time_badge = InfoBadge.custom("绘制: 0.000s", "#cc66ff", "#ffffff")
+        self.snake_direction_badge = InfoBadge.custom("方向: 无", "#ff6600", "#ffffff")
+        
+        self.performance_layout.addWidget(self.convert_time_badge)
+        self.performance_layout.addWidget(self.analyze_time_badge)
+        self.performance_layout.addWidget(self.path_calc_time_badge)
+        self.performance_layout.addWidget(self.draw_time_badge)
+        self.performance_layout.addWidget(self.snake_direction_badge)
+        self.performance_layout.setSpacing(10)
+        self.performance_layout.setAlignment(Qt.AlignCenter)
+
+        # 创建一个容器来包含性能计时显示栏
+        self.performance_container = QFrame()
+        self.performance_container.setLayout(self.performance_layout)
+
         layout.addWidget(self.screen_label)
         layout.addWidget(self.btn_start)
         layout.addWidget(self.btn_stop)
         layout.addWidget(self.btn_show_analysis)
         layout.addWidget(self.btn_show_screen)
-        layout.addWidget(self.log_level_button)
+        layout.addWidget(self.path_calc_label)
+        layout.addWidget(self.path_calc_combo)
+
+        layout.addWidget(self.performance_container)
         layout.addWidget(self.log_text)
         layout.addWidget(self.status_label)
         layout.addWidget(self.game_state_label)
@@ -102,8 +135,11 @@ class SnakeGameCard(QFrame):
 
         # 初始化 logger
         self.logger = SnakeLogger(self.log_text)
-        # 创建 SnakeAnalyzer 的实例，并将 logger 传递给它
-        self.snake_analyzer = SnakeAnalyzer(self.logger)
+        # 创建各个模块的实例，并将 logger 传递给它们
+        self.image_analyzer = ImageAnalyzer(self.logger)
+        self.path_calculator = PathCalculator(self.logger)
+        self.snake_controller = SnakeController(self.logger)
+        self.map_drawer = MapDrawer()
 
     def update_screen(self):
         """更新游戏画面预览并使用 OpenCV 进行处理"""
@@ -136,90 +172,99 @@ class SnakeGameCard(QFrame):
                         screen_cv = cv2.cvtColor(np.array(screen), cv2.COLOR_RGB2BGR)
                         convert_time = time.time() - start_time
 
-                        # 调用 SnakeAnalyzer 的 analyze_frame 方法
+                        # 1. 调用图像分析模块分析画面
                         analyze_start = time.time()
-                        game_state, path, special_cells = self.snake_analyzer.analyze_frame(screen_cv)
+                        try:
+                            game_state, board_state, special_cells = self.image_analyzer.analyze_frame(screen_cv)
+                        except Exception as e:
+                            self.logger.log(f"图像分析错误: {str(e)}")
+                            game_state, board_state, special_cells = None, None, {}
+                            analyze_time = 0
                         analyze_time = time.time() - analyze_start
+                        
+                        # 2. 如果游戏正在运行，计算路径
+                        path = []
+                        path_calc_start = time.time()
+                        if game_state == "running" and board_state:
+                            try:
+                                # 获取蛇头位置
+                                head_pos = None
+                                for r in range(len(board_state)):
+                                    for c in range(len(board_state[r])):
+                                        if board_state[r][c] == 'own_head':
+                                            head_pos = (c, r)
+                                            break
+                                    if head_pos:
+                                        break
+                                
+                                # 计算路径
+                                if head_pos:
+                                    path = self.path_calculator.calculate_path(board_state, head_pos)
+                            except Exception as e:
+                                self.logger.log(f"路径计算错误: {str(e)}")
+                                path = []
+                                path_calc_time = 0
+                        path_calc_time = time.time() - path_calc_start
+
+                        # 3. 如果游戏正在运行，控制蛇移动
+                        try:
+                            if game_state == "running" and board_state:
+                                # 设置游戏窗口
+                                self.snake_controller.set_game_window(self.selected_hwnd)
+                                
+                                # 根据路径确定下一步移动并控制蛇
+                                next_move = self.snake_controller.determine_next_move(board_state, path)
+                                if next_move:
+                                    self.snake_controller.control_snake(next_move)
+                            # 如果游戏已结束，尝试点击窗口中心
+                            elif game_state in ["game_over"]:
+                                self.snake_controller.set_game_window(self.selected_hwnd)
+                                self.snake_controller.click_window_center()
+                        except Exception as e:
+                            self.logger.log(f"蛇控制错误: {str(e)}")
 
                         # 更新 UI 上的状态标签
                         self.game_state_label.setText(f"当前状态: {game_state}")
 
-                        # 如果开启了分析结果显示
-                        if self.btn_show_analysis.isChecked():
-                            # 计算格子大小
-                            h, w = screen_cv.shape[:2]
-                            grid_h, grid_w = 25, 29
-                            cell_h = h / grid_h
-                            cell_w = w / grid_w
-
-                            # # 绘制网格线
-                            # for i in range(grid_h + 1):
-                            #     y = int(i * cell_h)
-                            #     cv2.line(screen_cv, (0, y), (w, y), (255, 255, 255), 1)  # 白色横线
-                            # for j in range(grid_w + 1):
-                            #     x = int(j * cell_w)
-                            #     cv2.line(screen_cv, (x, 0), (x, h), (255, 255, 255), 1)  # 白色竖线
-
-                            # 绘制路径
-                            if path and len(path) > 1:
-                                # 绘制路径起始点（绿色大圆）
-                                start_x = int(path[0][0] * cell_w + cell_w / 2)
-                                start_y = int(path[0][1] * cell_h + cell_h / 2)
-                                cv2.circle(screen_cv, (start_x, start_y), 8, (0, 255, 0), -1)  # 绿色起始点
-                                
-                                # 绘制路径线段
-                                for i in range(len(path)-1):
-                                    start_x = int(path[i][0] * cell_w + cell_w / 2)
-                                    start_y = int(path[i][1] * cell_h + cell_h / 2)
-                                    end_x = int(path[i+1][0] * cell_w + cell_w / 2)
-                                    end_y = int(path[i+1][1] * cell_h + cell_h / 2)
-                                    cv2.arrowedLine(screen_cv, (start_x, start_y), (end_x, end_y), (255, 0, 0), 2, tipLength=0.3)  # 带箭头的蓝色路径
-                                
-                                # 绘制路径终点（红色大圆）
-                                end_x = int(path[-1][0] * cell_w + cell_w / 2)
-                                end_y = int(path[-1][1] * cell_h + cell_h / 2)
-                                cv2.circle(screen_cv, (end_x, end_y), 8, (0, 0, 255), -1)  # 红色终点
-
-                            # 绘制特殊格子和中心点
-                            for (x, y), cell_type in special_cells.items():
-                                left = int(x * cell_w)
-                                top = int(y * cell_h)
-                                right = int(left + cell_w)
-                                bottom = int(top + cell_h)
-                                center_x = int(left + cell_w / 2)
-                                center_y = int(top + cell_h / 2)
-                                
-                                if cell_type == 'speed_boost':
-                                    color = (0, 255, 0)  # 绿色
-                                elif cell_type == 'score_boost':
-                                    color = (255, 165, 0)  # 橙色
-                                elif cell_type == 'own_head':
-                                    color = (0, 255, 255)  # 黄色
-                                elif cell_type == 'own_body':
-                                    color = (255, 255, 255)  # 白色
-                                elif cell_type == 'enemy_head':
-                                    color = (255, 0, 0)  # 红色
-                                elif cell_type == 'enemy_body':
-                                    color = (128, 0, 0)  # 深红色
-                                else:
-                                    continue
-                                
-                                # cv2.rectangle(screen_cv, (left, top), (right, bottom), color, 2)
-                                cv2.circle(screen_cv, (center_x, center_y), 4, color, -1)  # 在格子中心绘制实心圆点
-
-                        # 性能计时 - 绘制
                         draw_start = time.time()
+                        # 如果开启了分析结果显示，使用 map_drawer 绘制地图
+                        if self.btn_show_analysis.isChecked():
+                            screen_cv = self.map_drawer.draw_map(board_state, path, screen_cv)
+
                         # 将处理后的图像转换回RGB格式
                         screen_cv = cv2.cvtColor(screen_cv, cv2.COLOR_BGR2RGB)
                         # 将OpenCV图像转换回PIL格式
                         screen = Image.fromarray(screen_cv)
+
                         draw_time = time.time() - draw_start
 
-                        # 记录性能数据
-                        self.logger.log(f"性能统计 - 图像转换: {convert_time:.3f}s, 分析: {analyze_time:.3f}s, 绘制: {draw_time:.3f}s")
+                        # 更新性能计时显示栏
+                        self.convert_time_badge.setText(f"图像转换: {convert_time:.3f}s")
+                        self.analyze_time_badge.setText(f"棋盘分析: {analyze_time:.3f}s")
+                        self.path_calc_time_badge.setText(f"路径计算: {path_calc_time:.3f}s")
+                        self.draw_time_badge.setText(f"绘制: {draw_time:.3f}s")
+                        
+                        # 更新蛇的方向显示
+                        if path and len(path) > 1:
+                            current_pos = path[0]
+                            next_pos = path[1]
+                            dx = next_pos[0] - current_pos[0]
+                            dy = next_pos[1] - current_pos[1]
+                            direction = ""
+                            if dx > 0:
+                                direction = "右"
+                            elif dx < 0:
+                                direction = "左"
+                            elif dy > 0:
+                                direction = "下"
+                            elif dy < 0:
+                                direction = "上"
+                            self.snake_direction_badge.setText(f"方向: {direction}")
+                        else:
+                            self.snake_direction_badge.setText("方向: 无")
 
                     except Exception as e:
-                        self.status_label.setText(f"分析图像错误: {str(e)}")
+                        self.status_label.setText(f"运行错误: {str(e)}")
                         self.screen_label.clear()
                         return
             except Exception as e:
@@ -281,18 +326,22 @@ class SnakeGameCard(QFrame):
         """处理画面刷新开关的状态变化"""
         text = '开启画面刷新' if isChecked else '关闭画面刷新'
         self.btn_show_screen.setText(text)
-
-    def onLogLevelChanged(self, level: str):
-        """处理日志等级变化"""
-        level_map = {
-            'DEBUG': logging.DEBUG,
-            'INFO': logging.INFO,
-            'WARNING': logging.WARNING,
-            'ERROR': logging.ERROR,
-            'CRITICAL': logging.CRITICAL
-        }
-        self.logger.set_level(level_map[level])
-        self.log_level_button.setText(f'日志等级: {level}')
+        
+    def onPathCalcFrequencyChanged(self, index: int):
+        """处理路径计算频率变化"""
+        if not hasattr(self, 'path_calculator'):
+            return
+            
+        # 根据选择设置不同的路径计算间隔
+        if index == 0:  # 高频率 (每帧)
+            self.path_calculator.set_path_calc_interval(0.01)
+            self.logger.log("路径计算频率设置为: 高 (每帧)")
+        elif index == 1:  # 中频率
+            self.path_calculator.set_path_calc_interval(0.1)
+            self.logger.log("路径计算频率设置为: 中 (100ms)")
+        elif index == 2:  # 低频率
+            self.path_calculator.set_path_calc_interval(0.2)
+            self.logger.log("路径计算频率设置为: 低 (200ms)")
 
     def select_window(self):
         """选择要捕获的窗口"""
@@ -303,20 +352,3 @@ class SnakeGameCard(QFrame):
             self.status_label.setText("状态: 已找到'绝区零'窗口")
         else:
             self.status_label.setText("状态: 未找到'绝区零'窗口")
-
-    def createLogLevelButton(self):
-        """创建日志等级选择按钮"""
-        button = TransparentDropDownPushButton('日志等级: INFO', self, FluentIcon.LIBRARY)
-        button.setFixedHeight(34)
-        setFont(button, 12)
-
-        menu = RoundMenu(parent=self)
-        menu.addActions([
-            Action(FluentIcon.LIBRARY, 'DEBUG', triggered=lambda: self.onLogLevelChanged('DEBUG')),
-            Action(FluentIcon.LIBRARY, 'INFO', triggered=lambda: self.onLogLevelChanged('INFO')),
-            Action(FluentIcon.LIBRARY, 'WARNING', triggered=lambda: self.onLogLevelChanged('WARNING')),
-            Action(FluentIcon.LIBRARY, 'ERROR', triggered=lambda: self.onLogLevelChanged('ERROR')),
-            Action(FluentIcon.LIBRARY, 'CRITICAL', triggered=lambda: self.onLogLevelChanged('CRITICAL')),
-        ])
-        button.setMenu(menu)
-        return button
