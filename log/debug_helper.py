@@ -4,8 +4,8 @@ import time
 import cv2
 
 class DebugHelper:
-    _log_file_path = os.path.join(os.path.dirname(__file__), '..', 'debug', 'log.txt')
-    _image_dir = os.path.join(os.path.dirname(__file__), '..', 'debug', 'images')
+    _log_file_path = os.path.join(os.path.dirname(__file__), '..', '.debug', 'log.txt')
+    _image_dir = os.path.join(os.path.dirname(__file__), '..', '.debug', 'images')
     _lock = threading.Lock()
 
     @staticmethod
