@@ -2,42 +2,54 @@ import time
 from pynput import keyboard
 from pynput import mouse
 import win32gui
-from log import SnakeLogger
 
 class SnakeController:
     """负责根据地图和路径控制小蛇的类"""
     def __init__(self, logger=None):
         self.logger = logger
-        self.keyboard_controller = keyboard.Controller()  # 初始化键盘控制器
-        self.mouse_controller = mouse.Controller()  # 初始化鼠标控制器
-        self.last_press_time = 0  # 上次按键时间
-        self.last_click_time = 0  # 上次点击时间
-        self.hwnd = None  # 游戏窗口句柄
-        
+        self.keyboard_controller = keyboard.Controller()
+        self.mouse_controller = mouse.Controller()
+        self.last_press_time = 0
+        self.last_click_time = 0
+        self.hwnd = None
+        self.current_direction = None  # 新增：记录当前持续按下的方向键
+    
     def set_game_window(self, hwnd):
         """设置游戏窗口句柄"""
         self.hwnd = hwnd
         
     def control_snake(self, direction):
-        """
-        控制蛇的移动
-        :param direction: 移动方向，'w'上，'s'下，'a'左，'d'右
-        """
         if not direction:
+            # 提供空时，释放方向，停止移动
+            if self.current_direction is not None:
+                try:
+                    self.keyboard_controller.release(keyboard.KeyCode.from_char(self.current_direction))
+                except:
+                    pass
+                self.current_direction = None
             return
-            
+        
+        direction_map = {
+            'up': 'w',
+            'down': 's',
+            'left': 'a',
+            'right': 'd'
+        }
+        direction = direction_map.get(direction.lower(), direction)
+        
         try:
-            # 记录按键时间
-            current_time = time.time()
-            self.last_press_time = current_time
+            if direction == self.current_direction:
+                return
             
-            # 按下并释放按键
+            if self.current_direction is not None:
+                try:
+                    self.keyboard_controller.release(keyboard.KeyCode.from_char(self.current_direction))
+                except:
+                    pass
+            
             self.keyboard_controller.press(keyboard.KeyCode.from_char(direction))
-            time.sleep(0.05)  # 短暂延迟
-            self.keyboard_controller.release(keyboard.KeyCode.from_char(direction))
-            
-            if self.logger:
-                self.logger.log(f"控制蛇移动: {direction}")
+            self.last_press_time = time.time()
+            self.current_direction = direction
         except Exception as e:
             if self.logger:
                 self.logger.log(f"控制蛇移动出错: {str(e)}")
@@ -63,16 +75,13 @@ class SnakeController:
             
             # 移动鼠标到中心点并点击
             self.mouse_controller.position = (center_x, center_y)
-            time.sleep(0.1)  # 短暂延迟
+            time.sleep(1)  # 短暂延迟
             self.mouse_controller.press(mouse.Button.left)
-            time.sleep(0.1)  # 短暂延迟
+            time.sleep(1)  # 短暂延迟
             self.mouse_controller.release(mouse.Button.left)
             
             # 记录点击时间
             self.last_click_time = time.time()
-            
-            if self.logger:
-                self.logger.log("点击游戏窗口中心")
         except Exception as e:
             if self.logger:
                 self.logger.log(f"点击游戏窗口出错: {str(e)}")
