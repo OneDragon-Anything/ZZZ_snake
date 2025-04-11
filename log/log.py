@@ -27,7 +27,7 @@ class SnakeLogger:
         self.log_buffer.append(html)
 
     def _flush_buffer(self):
-        if not self.log_buffer:
+        if not self.log_buffer or not self.text_browser:
             return
         
         # 批量添加日志

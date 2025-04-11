@@ -1,6 +1,8 @@
 import cv2
 import numpy as np
 import time
+from log.debug_helper import DebugHelper  # 新增导入
+from model.image_cell import ImageCell    # <= 这里改成这样
 
 class BoardAnalyzer:
     """负责分析棋盘状态的类"""
@@ -15,6 +17,13 @@ class BoardAnalyzer:
         self.is_gameover = False
         self.is_running = False
         self.last_gameover_check = 0  # 上次检测gameover的时间戳
+        self.last_no_head_save_time = 0
+        self.last_eye_position = None  # 上一帧蛇眼重心坐标
+        self.eye_position = None       # 当前帧蛇眼重心坐标
+        self.last_eye_time = 0        # 最后检测到眼睛的时间戳
+        self.last_dir_change_pos = None  # 最后方向变化时的位置差(dx,dy)
+        self.last_dir_change_time = 0    # 最后方向变化的时间戳
+        self.eye_velocity = (0, 0)     # 蛇眼移动速度 (vx,vy) 像素/秒
 
         self.grid_colors_hsv = {
             "speed_boost": [72, 149, 235],
@@ -59,7 +68,6 @@ class BoardAnalyzer:
         self.head_direction = last_key_direction
         # 创建Board对象并设置图像
         if board_image is not None:
-            self.logger.log(f"你是怎么进来得")
             board.set_hsv_image(board_image, image_format)
         
         # 存储棋盘对象
@@ -114,6 +122,17 @@ class BoardAnalyzer:
         # 检测蛇头状态
         if "own_head" not in self.special_cells:
             # 初始化状态
+            print("没有找到蛇头")
+            now = time.time()
+            if now - self.last_no_head_save_time > 1:
+                try:
+                    file_path = DebugHelper.save_image(self.board.bgr_image, prefix="nosnakehead")
+                    self.last_no_head_save_time = now
+                    if self.logger:
+                        self.logger.log(f"[DEBUG] 未检测到蛇头，截图已保存至: {file_path}")
+                except Exception as e:
+                    if self.logger:
+                        self.logger.log(f"[DEBUG] 未检测到蛇头，保存截图异常: {e}")
             self.is_running = False
             self.head_position = None
             self.head_direction = None
@@ -121,6 +140,11 @@ class BoardAnalyzer:
         else:
             # 设置运行状态
             self.is_running = True
+
+
+        self.special_cells = {
+            k: v for k, v in self.special_cells.items() if v
+        }
 
         board.special_cells = self.special_cells
         board.head_position  = self.head_position
@@ -283,16 +307,27 @@ class BoardAnalyzer:
             
     def add_to_special_cells(self, cell_type, cell):
         """
-        将单元格添加到special_cells字典中
-        :param cell_type: 单元格类型
-        :param cell: 要添加的单元格对象
+        将单元格添加到special_cells字典中，避免坐标重复
         """
-        if cell_type in self.special_cells:
-            if cell not in self.special_cells[cell_type]:
-                self.special_cells[cell_type].append(cell)
-        else:
-            self.special_cells[cell_type] = [cell]
-            
+        if cell is None:
+            return  # 防止None被添加进来
+
+        # 可选！严格类型判断
+        if not isinstance(cell, ImageCell):
+            return  # 不是合法棋盘格，跳过
+
+        if cell_type not in self.special_cells:
+            self.special_cells[cell_type] = []
+
+        # 先移除坐标相同的已有cell
+        self.special_cells[cell_type] = [
+            c for c in self.special_cells[cell_type]
+            if not (c.row == cell.row and c.col == cell.col)
+        ]
+
+        # 添加新cell（坐标唯一）
+        self.special_cells[cell_type].append(cell)
+
     def remove_from_special_cells(self, cell_type, cell):
         """
         从special_cells字典中移除单元格
@@ -304,36 +339,93 @@ class BoardAnalyzer:
         
     def analyze_frame_changes(self, current_frame):
         """
-        分析前后帧的变化
-        :param current_frame: 当前帧画面
-        :param target_hsv: 目标HSV颜色值，格式为(h,s,v)。如果为None则使用默认的own_head颜色
-        :param tolerance: HSV各通道的误差范围，格式为[h_tolerance,s_tolerance,v_tolerance]
-        :return: 变化信息字典
-        """
-        
-        a = time.time()
-        # 调用蛇头方向分析方法，传入HSV参数
-        result = self.analyze_color_move_direction([self.own_head,0,255], [0,255,50],preset_direction=self.head_direction)
-        if result:
-            direction, head_center, edge_point = result
-            self.head_direction = direction
-            
-            cell = self.board.get_cell_by_position(edge_point[0], edge_point[1])
-            if cell:
-                self.head_position = cell.center
-                self.remove_from_special_cells(cell.cell_type, cell)
-                cell.cell_type = "own_head"
-                self.add_to_special_cells("own_head", cell)
-            self.head_position = head_center
+        分析前后帧的变化，并根据蛇眼判断蛇头格子
 
-        a = time.time()
+        :param current_frame: 当前帧HSV图像
+        :return: True
+        """
+        current_time = time.time()
+        eyes = self.find_snake_eye()
+        if eyes:
+            avg_x = int(np.mean([p[0] for p in eyes]))
+            avg_y = int(np.mean([p[1] for p in eyes]))
+            # 识别成功，更新历史缓存
+            self.last_eye_position = self.eye_position
+            self.eye_position = (avg_x, avg_y)
+            self.last_eye_time = current_time
+        else:
+            # 未检测到眼睛时，使用速度预测
+            if hasattr(self, 'last_dir_change_pos') and hasattr(self, 'last_eye_time'):
+                time_diff = current_time - self.last_eye_time
+                if time_diff < 0.5:  # 仅在短时间内预测
+                    pred_x = self.eye_position[0] + self.last_dir_change_pos[0] * time_diff
+                    pred_y = self.eye_position[1] + self.last_dir_change_pos[1] * time_diff
+                    self.eye_position = (int(pred_x), int(pred_y))
+                    if self.logger:
+                        self.logger.debug(f"使用预测位置: {self.eye_position}")
+
+        # 计算移动方向
+        move_direction = None
+        if self.eye_position and self.last_eye_position:
+            dx = self.eye_position[0] - self.last_eye_position[0]
+            dy = self.eye_position[1] - self.last_eye_position[1]
+            if abs(dx) > abs(dy):
+                if dx > 2:
+                    move_direction = 'right'
+                elif dx < -2:
+                    move_direction = 'left'
+            else:
+                if dy > 2:
+                    move_direction = 'down'
+                elif dy < -2:
+                    move_direction = 'up'
+
+            # 方向变化时记录位置和时间
+            if move_direction and move_direction != self.head_direction:
+                self.last_dir_change_pos = (dx, dy)
+                self.last_dir_change_time = current_time
+
+        # 用当前eye_position（无论新识别的还是缓存的）更新蛇头像素坐标
+        if self.eye_position:
+            avg_x, avg_y = self.eye_position
+            self.head_position = (avg_x, avg_y)
+            base_cell = self.board.get_cell_by_position(avg_x, avg_y)
+            target_cell = None
+
+            if base_cell:
+                cx, cy = self.board.get_cell_center(base_cell.row, base_cell.col)
+                offset_x = avg_x - cx
+                offset_y = avg_y - cy
+
+                border_threshold = 5
+
+                if move_direction == 'right' and offset_x > border_threshold:
+                    target_cell = self.board.get_cell_by_position(avg_x + 1, avg_y)
+                elif move_direction == 'left' and offset_x < -border_threshold:
+                    target_cell = self.board.get_cell_by_position(avg_x - 1, avg_y)
+                elif move_direction == 'down' and offset_y > border_threshold:
+                    target_cell = self.board.get_cell_by_position(avg_x, avg_y + 1)
+                elif move_direction == 'up' and offset_y < -border_threshold:
+                    target_cell = self.board.get_cell_by_position(avg_x, avg_y - 1)
+
+                if target_cell:
+                    self.remove_from_special_cells(target_cell.cell_type, target_cell)
+                    target_cell.cell_type = "own_head"
+                    self.add_to_special_cells("own_head", target_cell)
+                else:
+                    self.remove_from_special_cells(base_cell.cell_type, base_cell)
+                    base_cell.cell_type = "own_head"
+                    self.add_to_special_cells("own_head", base_cell)
+            else:
+                self.logger and self.logger.warning(f"蛇眼重心({avg_x},{avg_y})未匹配到格子")
+        else:
+            self.head_position = None  # 无缓存也没有新识别，置空
+
         self.determine_own_tail()
-        # 更新上一帧
         self.last_frame = current_frame
-        
-        #代表是否需要刷新画面，但我还没想好
+
         return True
-        
+
     def analyze_color_move_direction(self, target_hsv=None, tolerance=[5,255,50], multi_frame=True, preset_direction=None):
         """
         根据颜色检测蛇头位置，并判断蛇头方向
@@ -449,7 +541,6 @@ class BoardAnalyzer:
 
     def determine_precise_cell_position(self, direction, precise_pos):
         """
-        根据运动方向和精准坐标判定对象所在的精确格子位置
         :param direction: 移动方向 ('up','down','left','right')
         :param precise_pos: 精准坐标 (x,y)
         :return: [当前格子, 需要更新的格子] 或 None(当参数无效时)
@@ -490,3 +581,27 @@ class BoardAnalyzer:
             
         return [current_cell, new_cell]
 
+    def find_snake_eye(self):
+        """
+        在整张图像中寻找纯白色蛇眼区域，返回蛇眼中心坐标列表 [(x1,y1),(x2,y2),...]
+        """
+        # 白色HSV阈值
+        lower_white = np.array([0,0,255])
+        upper_white = np.array([10,10,255])
+        white_mask = cv2.inRange(self.board.hsv_image, lower_white, upper_white)
+
+        # 找所有白色区域轮廓
+        eye_contours, _ = cv2.findContours(white_mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+
+        eye_centers = []
+        for cnt in eye_contours:
+            if cv2.contourArea(cnt) < 0:  # 过滤特别小的噪声点
+                continue
+            M = cv2.moments(cnt)
+            if M["m00"] == 0:
+                continue
+            cx = int(M["m10"] / M["m00"])
+            cy = int(M["m01"] / M["m00"])
+            eye_centers.append((cx, cy))
+
+        return eye_centers

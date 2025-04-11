@@ -103,11 +103,11 @@ class SnakeGameCard(QFrame):
         
         self.snake_pos_badge = InfoBadge.custom("坐标: 无", "#333399", "#ffffff")   # 新增蛇头和下一步坐标标签
 
-        self.performance_layout.addWidget(self.convert_time_badge)
+        # self.performance_layout.addWidget(self.convert_time_badge)
         self.performance_layout.addWidget(self.analyze_time_badge)
         self.performance_layout.addWidget(self.path_time_badge)
-        self.performance_layout.addWidget(self.draw_time_badge)
-        # self.performance_layout.addWidget(self.player_time_badge)
+        # self.performance_layout.addWidget(self.draw_time_badge)
+        self.performance_layout.addWidget(self.player_time_badge)
         # self.performance_layout.addWidget(self.snake_direction_badge)
         self.performance_layout.addWidget(self.snake_pos_badge)    # 新增加入性能信息栏
         self.performance_layout.setSpacing(10)
@@ -226,13 +226,24 @@ class SnakeGameCard(QFrame):
         self.player_time_badge.setText(f"循环: {flash_time:.3f}s")
         self.snake_direction_badge.setText(f"方向: {snake_direction if snake_direction else '无'}")
         
-        # 新增：更新蛇头和下一个目标点的坐标显示
-        if path and len(path) >= 2:
-            head = path[0]
-            next_pos = path[1]
-            self.snake_pos_badge.setText(f"坐标: {head}->{next_pos}")
+        # 新增：更新蛇头和路径前两个节点的坐标显示
+        real_head_text = "无"
+        if board and "own_head" in board.special_cells and board.special_cells["own_head"]:
+            cell = board.special_cells["own_head"][0]
+            real_head_text = f"({cell.col},{cell.row})"
+
+        path_text = ""
+        if path:
+            if len(path) >= 2:
+                path_text = f"{path[0]}->{path[1]}"
+            elif len(path) == 1:
+                path_text = f"{path[0]}"
+            else:
+                path_text = "无"
         else:
-            self.snake_pos_badge.setText("坐标: 无")
+            path_text = "无"
+
+        self.snake_pos_badge.setText(f"蛇头:{real_head_text} 路径:{path_text}")
         
         if board:
             try:

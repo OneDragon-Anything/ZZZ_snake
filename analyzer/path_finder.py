@@ -1,6 +1,7 @@
 from collections import deque
 import random
-
+import heapq
+import time
 from PyQt5.QtCore import QObject, pyqtSignal
 
 class PathFinder(QObject):
@@ -27,12 +28,27 @@ class PathFinder(QObject):
         self.mid_risk_areas = set()
 
     def update_risk_areas(self, board):
-        """
-        根据棋盘特殊点更新高风险、低风险、中风险区域
-        """
         self.high_risk_areas.clear()
         self.low_risk_areas.clear()
         self.mid_risk_areas.clear()
+
+        # === 标记地图边缘为高风险 ===
+        for x in range(self.grid_width):
+            self.high_risk_areas.add((x, 0))
+            self.high_risk_areas.add((x, self.grid_height - 1))
+        for y in range(self.grid_height):
+            self.high_risk_areas.add((0, y))
+            self.high_risk_areas.add((self.grid_width - 1, y))
+
+        # === 标记地图边缘外一格为中风险 ===
+        for x in range(-1, self.grid_width + 1):
+            # 上下外一行
+            self.mid_risk_areas.add((x, -1))
+            self.mid_risk_areas.add((x, self.grid_height))
+        for y in range(-1, self.grid_height + 1):
+            # 左右外一列
+            self.mid_risk_areas.add((-1, y))
+            self.mid_risk_areas.add((self.grid_width, y))
 
         # 标记敌方蛇头周围1格为高风险
         if "enemy_head" in board.special_cells:
@@ -43,7 +59,7 @@ class PathFinder(QObject):
                     if 0 <= nx < self.grid_width and 0 <= ny < self.grid_height:
                         self.high_risk_areas.add((nx, ny))
 
-        # 敌方蛇身附近1格改为中风险
+        # 敌方蛇身附近1格为中风险
         if "enemy_body" in board.special_cells:
             for cell in board.special_cells["enemy_body"]:
                 x, y = cell.col, cell.row
@@ -52,7 +68,7 @@ class PathFinder(QObject):
                     if 0 <= nx < self.grid_width and 0 <= ny < self.grid_height:
                         self.mid_risk_areas.add((nx, ny))
 
-        # 自己蛇身附近1格设为低风险
+        # 自己蛇身附近1格为低风险
         if "own_body" in board.special_cells:
             for cell in board.special_cells["own_body"]:
                 x, y = cell.col, cell.row
@@ -61,6 +77,256 @@ class PathFinder(QObject):
                     if 0 <= nx < self.grid_width and 0 <= ny < self.grid_height:
                         self.low_risk_areas.add((nx, ny))
     
+
+    def find_path(self, start, target, board, init_path=None, min_path_length=2, method='A'):
+        """
+        统一寻路接口：支持A*和BFS
+        参数：
+            method:  'A' 用A*， 'B'用BFS，默认'B'
+        返回：
+            路径list 或 None
+        """
+        t0 = time.time()
+        if method == 'A':
+            path = self.find_path_astar(start, target, board, init_path=init_path, min_path_length=min_path_length)
+        else:
+            path = self.find_path_bfs(start, target, board, init_path=init_path, min_path_length=min_path_length)
+        t1 = time.time()
+        
+        return path
+
+
+    def find_path_astar(self, start, target, board, init_path=None, min_path_length=2):
+        """
+        使用A*算法路径寻路，可以断点续寻
+        返回拼接路径列表[start,...,target]，无法到达时返回None
+        """
+
+        self.update_risk_areas(board)
+
+        # 判断起点
+        if init_path and len(init_path) > 0:
+            # 续算起点
+            new_start = init_path[-1]
+            
+            # 检查续寻起点是否可通行
+            if new_start != target:  # 如果起点不是目标
+                x, y = new_start
+                if not (0 <= x < self.grid_width and 0 <= y < self.grid_height):
+                    return None
+                
+                cell = board.cells[y][x]
+                cell_type = cell.cell_type if cell else None
+                if cell_type not in ["empty", "score_boost", "own_head"] and new_start != target:
+                    return None
+        elif start:
+            new_start = start
+            init_path = []
+
+        else:
+            # 无起点，报错
+
+            return None
+
+        # 检查目标点是否可达
+        tx, ty = target
+        if not (0 <= tx < self.grid_width and 0 <= ty < self.grid_height):
+
+            return None
+            
+        target_cell = board.cells[ty][tx]
+        target_type = target_cell.cell_type if target_cell else None
+        if target_type not in ["empty", "score_boost", "own_head", "own_tail"]:
+
+            return None
+
+        # 定义风险权重
+        def risk_penalty(x, y):
+            pos = (x, y)
+            if pos in self.high_risk_areas:
+                return 6
+            elif pos in self.mid_risk_areas:
+                return 3
+            elif pos in self.low_risk_areas:
+                return 1
+            else:
+                return 0
+
+        def heuristic(a, b):
+            # 增加启发式函数权重，使路径更倾向于直线
+            return 1.2 * (abs(a[0]-b[0]) + abs(a[1]-b[1]))
+
+        open_set = []
+        count = 0
+        came_from = dict()
+        g_score = dict()
+        # 修改：不再使用visited集合来排除已访问节点，而是通过g_score判断
+        # visited = set()  # 记录已访问节点
+
+        # 初始化已有路径中每个点的累积代价
+        total_cost = 0
+        prev = None
+        
+        # 记录每个节点的来源方向
+        node_directions = {}
+        
+        # 处理初始路径
+        for idx, pt in enumerate(init_path):
+            # 不再将初始路径点加入visited集合
+            # visited.add(pt)
+            if idx == 0:
+                g_score[pt] = 0
+            else:
+                penalty = risk_penalty(pt[0], pt[1])
+                
+                # 计算方向变化并增加拐弯代价
+                if idx >= 2:
+                    prev_prev = init_path[idx-2]
+                    prev = init_path[idx-1]
+                    curr_dir = (pt[0] - prev[0], pt[1] - prev[1])
+                    prev_dir = (prev[0] - prev_prev[0], prev[1] - prev_prev[1])
+                    if curr_dir != prev_dir:  # 方向改变，增加拐弯代价
+                        penalty += 2  # 拐弯额外代价
+                    # 记录方向
+                    node_directions[pt] = curr_dir
+                
+                g_score[pt] = total_cost + 1 + penalty
+                came_from[pt] = prev
+                total_cost = g_score[pt]
+            prev = pt
+
+        # 将续算起点加入开放列表，并初始化其g_score
+        g_score[new_start] = total_cost  # 修复：确保起点有g_score
+        heapq.heappush(open_set, (total_cost + heuristic(new_start, target), count, new_start))
+        count += 1
+        
+        # 添加随机性，避免总是走相同路径
+        random_factor = 0.1  # 定义随机因子变量
+        
+        # 记录找到的最佳路径
+        best_path = None
+        
+        # 记录每个节点的来源方向
+        if len(init_path) >= 2:
+            for i in range(1, len(init_path)):
+                prev = init_path[i-1]
+                curr = init_path[i]
+                node_directions[curr] = (curr[0] - prev[0], curr[1] - prev[1])
+        
+        # 记录搜索状态
+        nodes_explored = 0
+        max_iterations = 1000  # 防止无限循环
+        
+        # 使用集合记录已处理的节点，避免重复处理
+        processed = set()
+        
+        while open_set and nodes_explored < max_iterations:
+            nodes_explored += 1
+            f_val, _, current = heapq.heappop(open_set)
+
+            # 防止 KeyError: 如果节点没有初始化g_score则跳过
+            if current not in g_score:
+                continue
+                
+            # 如果当前节点已处理过，跳过
+            if current in processed:
+                continue
+                
+            # 标记当前节点为已处理
+            processed.add(current)
+
+            if current == target:
+                # 重建新路径
+                path = [current]
+                temp = current
+                while temp in came_from:
+                    temp = came_from[temp]
+                    path.append(temp)
+                path.reverse()
+                
+                result = []
+                if init_path:
+                    # 修复：确保不会出现路径指回起点的情况
+                    # 检查新路径的第一个点是否就是初始路径的最后一个点
+                    if len(path) > 1 and path[0] == init_path[-1]:
+                        result.extend(init_path[:-1])  # 不包括最后一个点，因为它是新路径的起点
+                        result.extend(path)
+                    else:
+                        # 如果新路径不是从初始路径的最后一个点开始，可能是找到了另一条路径
+                        # 这种情况下，我们只返回新路径，不拼接
+
+                        result = path
+                else:
+                    result = path
+                
+                
+                # 保存找到的路径，但不立即返回
+                if len(result) >= min_path_length:
+                    # 找到符合长度要求的路径，立即返回
+                    return result
+                elif best_path is None or len(result) > len(best_path):
+                    # 保存最长的路径，即使不满足最小长度要求
+                    best_path = result
+                    
+                # 继续搜索，看是否能找到更长的路径
+                continue
+
+            x, y = current
+            # 随机打乱邻居顺序，增加路径多样性
+            moves = [(-1,0),(1,0),(0,-1),(0,1)]
+            random.shuffle(moves)
+            
+            for dx, dy in moves:
+                nx, ny = x+dx, y+dy
+                neighbor = (nx, ny)
+                if not (0 <= nx < self.grid_width and 0 <= ny < self.grid_height):
+                    continue
+
+                cell = board.cells[ny][nx]
+                cell_type = cell.cell_type if cell else None
+                is_passable = (cell_type in ["empty", "score_boost", "own_head"]) or neighbor == target
+                if not is_passable:
+                    continue
+
+                penalty = risk_penalty(nx, ny)
+                
+                # 计算拐弯代价
+                curr_dir = (dx, dy)
+                if current in node_directions:
+                    prev_dir = node_directions[current]
+                    if curr_dir != prev_dir:  # 方向改变，增加拐弯代价
+                        penalty += 2  # 拐弯额外代价
+                
+                tentative_g = g_score[current] + 1 + penalty
+
+                # 只检查g_score，不再使用visited集合来判断是否访问过
+                if (neighbor not in g_score) or (tentative_g < g_score[neighbor]):
+                    g_score[neighbor] = tentative_g
+                    came_from[neighbor] = current
+                    # 记录到达neighbor的方向
+                    node_directions[neighbor] = curr_dir
+                    
+                    # 添加微小随机因子，增加路径多样性
+                    random_value = random.random() * random_factor
+                    priority = tentative_g + heuristic(neighbor, target) + random_value
+                    
+                    count += 1
+                    heapq.heappush(open_set, (priority, count, neighbor))
+
+            
+        # 如果找到了路径但长度不够，返回最长的那个
+        if best_path is not None:
+            return best_path
+            
+        # 尝试放宽条件，允许更短的路径
+        if min_path_length > 2:
+
+            return self.find_path_astar(start, target, board, init_path, 2)
+            
+
+        return None  # 找不到
+
+
     def find_path_bfs(self, start, target, board, init_path=None, min_path_length=2):
         """
         广度优先搜索（BFS）寻路，带危险等级优先
@@ -93,12 +359,12 @@ class PathFinder(QObject):
                 current_pos, path = queue.popleft()
                 x, y = current_pos
 
-                if current_pos == target:
-                    if len(path) >= min_path_length:
-                        found_path = path
-                        break
-                    else:
-                        continue
+                # 计算当前方向：
+                if len(path) >= 2:
+                    prev_x, prev_y = path[-2]
+                    dir_vec = (x - prev_x, y - prev_y)
+                else:
+                    dir_vec = None
 
                 moves = [(0, -1), (0, 1), (-1, 0), (1, 0)]
 
@@ -107,13 +373,25 @@ class PathFinder(QObject):
                     if pos in self.high_risk_areas:
                         return 2
                     elif hasattr(self, 'mid_risk_areas') and pos in self.mid_risk_areas:
-                        return 1.5  # 中风险介于1~2
+                        return 1.5
                     elif pos in self.low_risk_areas:
                         return 1
                     else:
                         return 0
 
-                moves.sort(key=lambda m: risk_level(x + m[0], y + m[1]))
+                def move_priority(m):
+                    dx, dy = m
+                    same_dir = (dir_vec is not None) and ((dx, dy) == dir_vec)
+                    return (0 if same_dir else 1, risk_level(x + dx, y + dy))
+
+                moves.sort(key=move_priority)
+
+                if current_pos == target:
+                    if len(path) >= min_path_length:
+                        found_path = path
+                        break
+                    else:
+                        continue
 
                 for dx, dy in moves:
                     next_x, next_y = x + dx, y + dy
@@ -125,7 +403,6 @@ class PathFinder(QObject):
                         if not is_valid:
                             continue
 
-                        # 核心：只允许小于等于当前阈值的风险
                         if risk_level(next_x, next_y) > risk_threshold:
                             continue
 
@@ -140,7 +417,7 @@ class PathFinder(QObject):
 
     def find_path_to_score_boost(self, board, direction=None):
         """
-        尝试往分数点，再接尾巴，确保安全
+        尝试往分数点，再接安全区域，确保安全
         输入：
             board: 当前棋盘
             direction: 当前方向
@@ -157,55 +434,74 @@ class PathFinder(QObject):
         if "score_boost" in board.special_cells:
             for cell in board.special_cells["score_boost"]:
                 score_boosts.append((cell.col, cell.row))
+        
+        # 没有分数点时直接返回None
+        if not score_boosts:
+            return None
 
-        for target in score_boosts:
-            path1 = self.find_path_bfs(self.start_pos, target, board)
-            if path1:
-                # 找到去score的路后，再接着往尾巴找
-                if "own_tail" not in board.special_cells or not board.special_cells["own_tail"]:
-                    continue  # 无尾巴坐标，换下一个分数点
-                tail_cell = board.special_cells["own_tail"][0]
-                tail_pos = (tail_cell.col, tail_cell.row)
-                path2 = self.find_path_bfs(None, tail_pos, board, init_path=path1, min_path_length=3)
-                if path2:
-                    return path2
+        # 尝试两种寻路方法，增加成功率
+        for method in ['A']:
+            for target in score_boosts:
+                # 确保目标点是有效的
+                if not (0 <= target[0] < board.cols and 0 <= target[1] < board.rows):
+                    continue
+
+                # 新增：忽略边缘两格以内的分数点
+                if target[0] < 2 or target[0] >= board.cols - 2 or target[1] < 2 or target[1] >= board.rows - 2:
+                    continue
+                    
+                path1 = self.find_path(self.start_pos, target, board, method=method, min_path_length=3)
+                if path1:
+                    if path1[-1] != target:
+                        continue
+                        
+                    # 找到去score的路后，尝试接上安全区域
+                    rect = self.find_largest_empty_rectangle(board)
+                    x0, y0, w, h = rect
+                    if w > 0 and h > 0:
+                        safe_target = (x0 + w // 2, y0 + h // 2)
+                    else:
+                        safe_target = self.find_furthest_from_enemy_heads_bfs(board)
+                    
+                    # 如果有安全点，考虑拼接逃生路径
+                    if safe_target:
+                        path2 = self.find_path(None, safe_target, board, init_path=path1, min_path_length=5, method=method)
+                        if path2:
+                            return path2
+                        else:
+                            # 无法拼出逃生路径，判定死路
+                            continue
+                    else:
+                        # 没有任何逃生点，死路
+                        continue
+                    
+        # 兜底：如果完全没有找到转移到安全区的路径，判死路
         return None
 
-    def find_random_path(self, board):
+    def find_safe_path(self, board):
         """
-        随机选择一个空格并查路径（无目标保命时备用）
+        智能逃生策略：
+        先尝试最大空白矩形的中心点逃跑，
+        再退而求其次寻找距离敌方蛇头最远的空白格
         """
-        empty_cells = []
-        if "empty" in board.special_cells:
-            for cell in board.special_cells["empty"]:
-                empty_cells.append((cell.col, cell.row))
-        if not empty_cells:
-            return None
-        target = random.choice(empty_cells)
-        return self.find_path_bfs(self.start_pos, target, board)
+        # 1. 最大空白矩形 中心点
+        x, y, w, h = self.find_largest_empty_rectangle(board)
+        if w > 0 and h > 0:
+            center_x = x + w // 2
+            center_y = y + h // 2
+            path = self.find_path(self.start_pos, (center_x, center_y), board, min_path_length=3, method='B')
+            if path:
+                return path
 
-    def update_board_with_enemy_heads(self, board):
-        """
-        老版-直接在棋盘上将敌方蛇头扩散2格范围内全部设为“enemy_head”
-        实际中已不推荐用，而用update_risk_areas
+        # 2. 距离敌头最远的点
+        target = self.find_furthest_from_enemy_heads_bfs(board)
+        if target:
+            path = self.find_path(self.start_pos, target, board, min_path_length=3, method='B')
+            if path:
+                return path
 
-        返回：
-            修改后的board对象
-        """
-        # 将敌蛇蛇头附近五格(即半径2范围)都标记成enemy_head
-        enemy_heads = []
-        if "enemy_head" in board.special_cells:
-            for cell in board.special_cells["enemy_head"]:
-                enemy_heads.append((cell.col, cell.row))
-        for x0, y0 in enemy_heads:
-            for dx in range(-2, 3):
-                for dy in range(-2, 3):
-                    x, y = x0 + dx, y0 + dy
-                    if 0 <= x < board.cols and 0 <= y < board.rows:
-                        cell = board.cells[y][x]
-                        if cell:
-                            cell.cell_type = "enemy_head"
-        return board
+        # 3. 全失败，放弃
+        return None
 
     def find_path_to_tail(self, board):
         """
@@ -217,30 +513,22 @@ class PathFinder(QObject):
         head_cell = board.special_cells["own_head"][0]
         head_pos = (head_cell.col, head_cell.row)
 
-        # 计算蛇头前方一格作为起点，避免判定蛇身无路
-        x, y = head_pos
-        if self.current_direction == 'up':
-            start_pos = (x, y - 1)
-        elif self.current_direction == 'down':
-            start_pos = (x, y + 1)
-        elif self.current_direction == 'left':
-            start_pos = (x - 1, y)
-        elif self.current_direction == 'right':
-            start_pos = (x + 1, y)
-        else:
-            start_pos = head_pos
-
-        if not (0 <= start_pos[0] < board.cols and 0 <= start_pos[1] < board.rows):
-            return None
-
-        self.start_pos = start_pos
+        self.start_pos = head_pos
 
         if "own_tail" not in board.special_cells:
             return None
         tail_cell = board.special_cells["own_tail"][0]
         tail_pos = (tail_cell.col, tail_cell.row)
 
-        return self.find_path_bfs(self.start_pos, tail_pos, board)
+        path = self.find_path(head_pos, tail_pos, board, min_path_length=5, method='A')
+        if path:
+            return path
+
+        path = self.find_path(head_pos, tail_pos, board, min_path_length=3, method='A')
+        if path:
+            return path
+
+        return None
 
     def find_path_to_nearest_empty(self, board):
         """
@@ -292,6 +580,88 @@ class PathFinder(QObject):
                     available_directions.append(d)
         return available_directions
 
+    def find_largest_empty_rectangle(self, board):
+        """
+        动态规划+单调栈，寻找最大空白矩形
+        返回：(左上角x, 左上角y, 宽度w, 高度h)
+        """
+        rows, cols = board.rows, board.cols
+        heights = [[0]*cols for _ in range(rows)]
+        max_area = 0
+        max_rect = (0,0,0,0)
+
+        # 计算每行的高度图
+        for y in range(rows):
+            for x in range(cols):
+                cell = board.cells[y][x]
+                if cell and cell.cell_type == "empty":
+                    heights[y][x] = 1 + (heights[y-1][x] if y > 0 else 0)
+                else:
+                    heights[y][x] = 0
+
+        # 对每一行做直方图最大矩形
+        for y in range(rows):
+            stack = []
+            hist = heights[y]+[0]  # 哨兵简化代码
+            for i in range(cols+1):
+                while stack and hist[i] < hist[stack[-1]]:
+                    top_idx = stack.pop()
+                    h = hist[top_idx]
+                    w = i if not stack else i - stack[-1] - 1
+                    area = h * w
+                    if area > max_area:
+                        max_area = area
+                        # 计算矩形左上坐标位置
+                        left = stack[-1]+1 if stack else 0
+                        top = y - h +1
+                        max_rect = (left, top, w, h)
+                stack.append(i)
+        return max_rect  # (x, y, w, h)
+
+    def find_furthest_from_enemy_heads_bfs(self, board):
+        """
+        BFS从所有敌人头开始扩散，找到最远的空白格子
+        返回：(x,y)
+        """
+        rows, cols = board.rows, board.cols
+        dist_map = [[-1 for _ in range(cols)] for _ in range(rows)]
+        from collections import deque
+
+        queue = deque()
+        # 初始化：敌头集合
+        for key in ['enemy_head', 'enemy2_head', 'enemy3_head']:
+            heads = board.special_cells.get(key, [])
+            for cell in heads:
+                x, y = cell.col, cell.row
+                dist_map[y][x] = 0
+                queue.append((x,y))
+        
+        # BFS扩散距离
+        while queue:
+            x, y = queue.popleft()
+            for dx, dy in [(-1,0),(1,0),(0,-1),(0,1)]:
+                nx, ny = x+dx, y+dy
+                if 0<=nx<cols and 0<=ny<rows:
+                    cell = board.cells[ny][nx]
+                    if not cell or cell.cell_type != "empty":
+                        continue
+                    if dist_map[ny][nx] == -1:
+                        dist_map[ny][nx] = dist_map[y][x] +1
+                        queue.append((nx, ny))
+
+        # 找距离最大的空格
+        max_dist = -1
+        result = None
+        for y in range(rows):
+            for x in range(cols):
+                cell = board.cells[y][x]
+                if not cell or cell.cell_type != "empty":
+                    continue
+                if dist_map[y][x] > max_dist:
+                    max_dist = dist_map[y][x]
+                    result = (x,y)
+        return result
+
     def find_path_in_order(self, board):
         """
         优先策略顺序寻路（分数道具优先，再找尾巴，再瞎走）
@@ -301,6 +671,10 @@ class PathFinder(QObject):
         """
 
         path = self.find_path_to_score_boost(board)
+        if path:
+            return path
+
+        path = self.find_safe_path(board)
         if path:
             return path
 

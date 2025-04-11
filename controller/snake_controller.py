@@ -20,13 +20,7 @@ class SnakeController:
         
     def control_snake(self, direction):
         if not direction:
-            # 提供空时，释放方向，停止移动
-            if self.current_direction is not None:
-                try:
-                    self.keyboard_controller.release(keyboard.KeyCode.from_char(self.current_direction))
-                except:
-                    pass
-                self.current_direction = None
+            self.current_direction = None
             return
         
         direction_map = {
@@ -38,16 +32,15 @@ class SnakeController:
         direction = direction_map.get(direction.lower(), direction)
         
         try:
-            if direction == self.current_direction:
-                return
+            # 不管方向是否改变，始终按一下键
+            # if direction == self.current_direction:
+            #     return
             
-            if self.current_direction is not None:
-                try:
-                    self.keyboard_controller.release(keyboard.KeyCode.from_char(self.current_direction))
-                except:
-                    pass
-            
-            self.keyboard_controller.press(keyboard.KeyCode.from_char(direction))
+            key = keyboard.KeyCode.from_char(direction)
+            self.keyboard_controller.press(key)
+            time.sleep(0.02)  # 模拟按下持续时间
+            self.keyboard_controller.release(key)
+                
             self.last_press_time = time.time()
             self.current_direction = direction
         except Exception as e:

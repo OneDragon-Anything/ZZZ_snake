@@ -5,6 +5,7 @@ from qfluentwidgets import FluentWindow
 from view.card.snake_card import SnakeGameCard
 from view.card.board_analyzer_test_card import BoardAnalyzerTestCard
 from view.card.settings_card import SettingsCard   # 新增导入
+from view.card.template_card import TemplateCard
 from qfluentwidgets import (
     FluentIcon, NavigationItemPosition
 )
@@ -28,6 +29,8 @@ class MainWindow(FluentWindow):
         self.game_widget = SnakeGameCard(snake_player_thread=self.snake_player_thread)
 
         self.board_analyzer_widget = BoardAnalyzerTestCard()
+        
+        self.template_card = TemplateCard()
 
         # 传递日志logger给设置界面
         self.settings_card = SettingsCard(self.game_widget.logger)
@@ -49,6 +52,13 @@ class MainWindow(FluentWindow):
             FluentIcon.SETTING,
             'settings',
             position=NavigationItemPosition.BOTTOM
+        )
+        
+        self.addSubInterface(
+            self.template_card,
+            FluentIcon.PHOTO,
+            'template',
+            position=NavigationItemPosition.TOP
         )
 
     def _initNavigation(self):

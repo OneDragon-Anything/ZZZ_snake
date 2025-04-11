@@ -31,6 +31,7 @@ class Board:
         self.cells = None         # 存储BoardCell对象的二维数组
         self.special_cells = {}
         self.head_position = None  # 蛇头精准坐标 (x,y)
+        self.eye_position = None  # 蛇眼精准坐标 (x,y)
         self.head_direction = None  # 蛇头运动方向 ('up','down','left','right')
         
         if image is not None:

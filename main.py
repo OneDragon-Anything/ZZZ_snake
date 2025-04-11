@@ -58,7 +58,7 @@ class SnakePlayerThread(QThread):
                 continue
                 
             # 控制帧率
-            self.msleep(0)  # 约20帧每秒
+            self.msleep(2)  # 约20帧每秒
     
     def stop(self):
         """停止线程"""

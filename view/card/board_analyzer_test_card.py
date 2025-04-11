@@ -87,6 +87,10 @@ class BoardAnalyzerTestCard(QWidget):
         self.current_direction_index = -1
         self.current_direction = None
 
+        # 新增检测蛇眼按钮
+        self.detect_eye_button = PrimaryPushButton('检测蛇眼')
+        self.detect_eye_button.clicked.connect(self.detect_snake_eye_show)
+
         self.path_finding_switch = SwitchButton('开启寻路')
         self.path_finding_switch.setChecked(True)
 
@@ -110,14 +114,19 @@ class BoardAnalyzerTestCard(QWidget):
         hsv_layout.addWidget(self.s_range_input)
         hsv_layout.addWidget(self.v_range_input)
 
+        # 按钮横向布局
+        button_layout = QHBoxLayout()
+        button_layout.addWidget(self.open_button)
+        button_layout.addWidget(self.direction_button)
+        button_layout.addWidget(self.detect_eye_button)
+
         layout = QVBoxLayout(self)
         layout.setContentsMargins(20, 20, 20, 20)
         layout.setSpacing(20)
         layout.addWidget(self.title)
         layout.addWidget(self.image_card)
         layout.addWidget(self.info_label)
-        layout.addWidget(self.open_button, alignment=Qt.AlignCenter)
-        layout.addWidget(self.direction_button, alignment=Qt.AlignCenter)
+        layout.addLayout(button_layout)  # 用横向按钮替换
         layout.addWidget(self.path_finding_switch, alignment=Qt.AlignCenter)
         layout.addLayout(hsv_layout)
 
@@ -134,6 +143,43 @@ class BoardAnalyzerTestCard(QWidget):
         self.direction_button.setText(f"切换方向: {self.current_direction}")
         if self.current_hsv is not None:
             self._analyze_and_draw(self.current_hsv)
+
+    def detect_snake_eye_show(self):
+        """
+        蛇眼检测并绘制
+        """
+        if self.current_hsv is None:
+            self.logger.warning("没有图像数据")
+            return
+
+        eyes = self.analyzer.find_snake_eye()
+        self.logger.info(f"检测到蛇眼数量: {len(eyes)}")
+        for pt in eyes:
+            self.logger.info(f"蛇眼坐标: {pt}")
+
+        # 一定要用当前HSV重新生成的BGR做绘制，避免覆盖
+        hsv_img = self.current_hsv
+        bgr_img = cv2.cvtColor(hsv_img, cv2.COLOR_HSV2BGR).copy()
+
+        for (cx, cy) in eyes:
+            # 绘制绿色中心点
+            cv2.circle(bgr_img, (int(cx), int(cy)), 4, (0,255,0), -1)
+            # 外圈红色圆
+            cv2.circle(bgr_img, (int(cx), int(cy)), 10, (0, 0, 255), 2)
+
+        rgb_img = cv2.cvtColor(bgr_img, cv2.COLOR_BGR2RGB)
+        h, w = rgb_img.shape[:2]
+        bytes_per_line = 3 * w
+        qimg = QImage(rgb_img.data, w, h, bytes_per_line, QImage.Format_RGB888)
+
+        self.current_pixmap = QPixmap.fromImage(qimg)
+        scaled_pixmap = self.current_pixmap.scaled(
+            self.image_card.label.width(),
+            self.image_card.label.height(),
+            Qt.KeepAspectRatio,
+            Qt.SmoothTransformation
+        )
+        self.image_card.setPixmap(scaled_pixmap)
 
     def wheelEvent(self, event):
         if self.current_pixmap:
@@ -189,11 +235,13 @@ class BoardAnalyzerTestCard(QWidget):
         board = self.analyzer.analyze_board(board, self.current_hsv, 'HSV', self.current_direction)
         analyze_end = time.time()
 
+        print(f"开始寻路{self.analyzer.is_running}")
         path = None
         path_time = 0
         if self.path_finding_switch.isChecked() and self.analyzer.is_running:
             pf = PathFinder(board.rows, board.cols, self.logger)
             path_start = time.time()
+            print("寻路完成")
             path = pf.find_path_in_order(board)
             path_end = time.time()
             path_time = path_end - path_start
@@ -250,31 +298,36 @@ class BoardAnalyzerTestCard(QWidget):
             self.logger.error("容差输入有误")
             return
 
-        target_h = self.analyzer.own_head
-        lower = (max(0, target_h - h_tol), max(0, 213 - s_tol), max(0, 255 - v_tol))
-        upper = (min(179, target_h + h_tol), min(255, 213 + s_tol), min(255, 255 + v_tol))
+        target_h, target_s, target_v = self.analyzer.grid_colors_hsv["own_head"]
+        target_h, target_s, target_v =  [0,0,255]
+        lower = np.array([
+            max(0, target_h - h_tol),
+            max(0, target_s - s_tol),
+            max(0, target_v - v_tol)
+        ])
+        upper = np.array([
+            min(179, target_h + h_tol),
+            min(255, target_s + s_tol),
+            min(255, target_v + v_tol)
+        ])
 
         mask = cv2.inRange(self.current_hsv, lower, upper)
 
         contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
         self.logger.info(f"找到 {len(contours)} 个连通区域")
 
-        # 默认先画灰度mask转换成彩色
         color_img = cv2.cvtColor(mask, cv2.COLOR_GRAY2BGR)
-        # 将背景设置为灰色以便标记清晰可见
         color_img[mask == 0] = (128, 128, 128)
 
         if contours:
             max_contour = max(contours, key=cv2.contourArea)
             points = max_contour.reshape(-1, 2)
 
-            # 计算四个方向的极值点
             up_point = tuple(points[np.argmin(points[:, 1])])
             down_point = tuple(points[np.argmax(points[:, 1])])
             left_point = tuple(points[np.argmin(points[:, 0])])
             right_point = tuple(points[np.argmax(points[:, 0])])
 
-            # 输出调试信息
             self.logger.info(f"最上点 (up): {up_point}")
             self.logger.info(f"最下点 (down): {down_point}")
             self.logger.info(f"最左点 (left): {left_point}")
@@ -292,7 +345,6 @@ class BoardAnalyzerTestCard(QWidget):
                 edge_point = right_point
 
             if edge_point is not None:
-                # 标记该点
                 color = (0, 0, 255)
                 radius = 15
                 thickness = 15
@@ -359,8 +411,20 @@ class BoardAnalyzerTestCard(QWidget):
                         info += f"  {k}: {v}\n"
                 if hasattr(cell, 'bounds'):
                     info += f"边界: {cell.bounds}\n"
-                self.info_label.setText(info)
 
+                # 新增: 输出该像素点击的HSV值
+                if self.current_hsv is not None:
+                    # 计算在hsv图像中的物理像素坐标
+                    h_hsv, w_hsv = self.current_hsv.shape[:2]
+                    x_hsv = int(x_image / pix_w * w_hsv)
+                    y_hsv = int(y_image / pix_h * h_hsv)
+                    if 0 <= y_hsv < h_hsv and 0 <= x_hsv < w_hsv:
+                        hsv_val = self.current_hsv[y_hsv, x_hsv]
+                        info += f"点击像素HSV值: ({hsv_val[0]}, {hsv_val[1]}, {hsv_val[2]})\n"
+
+                self.info_label.setText(info)
+                self.info_label.verticalScrollBar().setValue(self.info_label.verticalScrollBar().maximum())
+                
 if __name__ == '__main__':
     from PyQt5.QtWidgets import QApplication
     import sys

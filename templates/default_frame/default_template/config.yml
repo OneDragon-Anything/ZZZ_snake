@@ -1,0 +1,6 @@
+crop_area: ''
+frame_id: default_frame
+hsv_lower: 0,0,0
+hsv_upper: 179,255,255
+template_id: default_template
+template_name: 新模板

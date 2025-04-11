@@ -55,7 +55,7 @@ class SettingsCard(QWidget):
         layout.addWidget(self.info_label)
 
     def change_log_level(self, level):
-        self.logger.log_level(level)
+        self.logger.log_level = level
         print(f"日志等级切换为：{level}")
 
     def change_theme(self, theme_text):
