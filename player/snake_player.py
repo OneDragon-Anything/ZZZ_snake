@@ -11,6 +11,7 @@ from analyzer.path_finder import PathFinder
 from controller.snake_controller import SnakeController
 from log.debug_helper import DebugHelper
 
+
 class SnakePlayer(QObject):
     """
     蛇玩家类：负责游戏控制、路径规划和界面更新
@@ -20,8 +21,11 @@ class SnakePlayer(QObject):
     3. 蛇的移动控制
     4. 状态更新和信号发送
     """
+
     # 状态更新信号：游戏状态、棋盘、各阶段耗时、当前方向、路径
-    board_updated = pyqtSignal(object, object, float, float, float, float, float, str, object)
+    board_updated = pyqtSignal(
+        object, object, float, float, float, float, float, str, object
+    )
 
     # 常量定义
     CACHE_SIZE = 5
@@ -31,8 +35,15 @@ class SnakePlayer(QObject):
     REVIVE_INTERVAL = 1.0
     BOARD_WIDTH = 29
     BOARD_HEIGHT = 25
-    VALID_DIRECTIONS = {'up', 'down', 'left', 'right'}
-    SAFE_CELL_TYPES = {"empty", "score_boost", "own_head", "unknow", "own_tail", "own_body"}
+    VALID_DIRECTIONS = {"up", "down", "left", "right"}
+    SAFE_CELL_TYPES = {
+        "empty",
+        "score_boost",
+        "own_head",
+        "unknow",
+        "own_tail",
+        "own_body",
+    }
 
     def __init__(self, logger=None):
         super().__init__()
@@ -41,20 +52,20 @@ class SnakePlayer(QObject):
         self.board_analyzer = BoardAnalyzer(logger)
         self.path_finder = PathFinder(self.BOARD_HEIGHT, self.BOARD_WIDTH, logger)
         self.snake_controller = SnakeController(logger)
-        
+
         # 游戏状态相关
         self.board = None
         self.current_direction = None
         self.current_path = []
         self.head_next_pos = None
-        
+
         # 画面捕获相关
         self.sct = mss.mss()
         self.last_window_hwnd = None
         self.last_window_rect = None
         self.cache_images = [None] * self.CACHE_SIZE
         self.cache_index = 0
-        
+
         # 时间控制相关
         self.last_cache_update_time = 0
         self.last_click_time = 0
@@ -63,14 +74,14 @@ class SnakePlayer(QObject):
         self.last_hwnd = 0
         self.last_snake_move_time = 0
         self.last_time_control_snake_head = None
-        
+
         # 性能统计相关
         self.convert_time = 0
         self.analyze_time = 0
         self.path_calc_time = 0
         self.draw_time = 0
         self.time_since_last_frame = 0
-        
+
         # 调试相关
         self.reason = None
 
@@ -84,7 +95,7 @@ class SnakePlayer(QObject):
         for i in range(len(self.cache_images)):
             self.cache_images[i] = None
 
-    def capture_screen(self, hwnd) -> 'np.ndarray|None':
+    def capture_screen(self, hwnd) -> "np.ndarray|None":
         """截取游戏窗口内容"""
         if not self._validate_window(hwnd):
             return None
@@ -149,16 +160,16 @@ class SnakePlayer(QObject):
             "left": x1,
             "top": y1,
             "width": x2 - x1,
-            "height": y2 - y1
+            "height": y2 - y1,
         }
 
-    def _grab_and_process_screen(self, sct) -> 'np.ndarray':
+    def _grab_and_process_screen(self, sct) -> "np.ndarray":
         """抓取并处理屏幕图像"""
         sct_img = sct.grab(self.last_window_rect)
         img = np.asarray(sct_img)
         return cv2.cvtColor(img, cv2.COLOR_BGRA2BGR)
 
-    def _update_image_cache(self, screen_cv: 'np.ndarray'):
+    def _update_image_cache(self, screen_cv: "np.ndarray"):
         """更新图像缓存"""
         current_time = time.time()
         if current_time - self.last_cache_update_time >= self.CACHE_UPDATE_INTERVAL:
@@ -168,7 +179,7 @@ class SnakePlayer(QObject):
             self.cache_index = (self.cache_index + 1) % self.CACHE_SIZE
             self.last_cache_update_time = current_time
 
-    def process_frame(self, screen_cv: 'np.ndarray', hwnd) -> tuple:
+    def process_frame(self, screen_cv: "np.ndarray", hwnd) -> tuple:
         """处理当前帧"""
         self.last_hwnd = hwnd
         if not self._check_prerequisites():
@@ -182,7 +193,7 @@ class SnakePlayer(QObject):
                 return game_state, None, []
 
             self._evaluate_current_path()
-            
+
             if game_state == "running":
                 self._handle_running_state(hwnd)
             elif game_state == "game_over":
@@ -197,22 +208,29 @@ class SnakePlayer(QObject):
 
     def _check_prerequisites(self) -> bool:
         """检查必要条件"""
-        return hasattr(self, 'board_updated') and hasattr(self, 'logger')
+        return hasattr(self, "board_updated") and hasattr(self, "logger")
 
     def _update_frame_time(self):
         """更新帧时间"""
         now = time.time()
-        self.time_since_last_frame = 0 if self.last_process_time is None else now - self.last_process_time
+        self.time_since_last_frame = (
+            0 if self.last_process_time is None else now - self.last_process_time
+        )
         self.last_process_time = now
 
-    def _analyze_frame(self, screen_cv: 'np.ndarray') -> tuple:
+    def _analyze_frame(self, screen_cv: "np.ndarray") -> tuple:
         """分析当前帧"""
         analyze_start = time.time()
         try:
             if self.board is None:
-                self.board = Board(self.BOARD_HEIGHT, self.BOARD_WIDTH, image=screen_cv, image_format='BGR')
+                self.board = Board(
+                    self.BOARD_HEIGHT,
+                    self.BOARD_WIDTH,
+                    image=screen_cv,
+                    image_format="BGR",
+                )
             else:
-                self.board.set_hsv_image(screen_cv, image_format='BGR')
+                self.board.set_hsv_image(screen_cv, image_format="BGR")
 
             self.board = self.board_analyzer.analyze_board(
                 self.board, last_key_direction=self.current_direction
@@ -237,11 +255,19 @@ class SnakePlayer(QObject):
 
     def _validate_board(self, board: Board) -> bool:
         """验证棋盘有效性"""
-        if not board or not hasattr(board, 'cells') or not isinstance(board.cells, list) or not board.cells:
+        if (
+            not board
+            or not hasattr(board, "cells")
+            or not isinstance(board.cells, list)
+            or not board.cells
+        ):
             self.log_error("analyze_board 返回棋盘非法")
             return False
 
-        if len(board.cells) < self.BOARD_HEIGHT or len(board.cells[0]) < self.BOARD_WIDTH:
+        if (
+            len(board.cells) < self.BOARD_HEIGHT
+            or len(board.cells[0]) < self.BOARD_WIDTH
+        ):
             self.log_error(f"棋盘尺寸异常: {len(board.cells)}×{len(board.cells[0])}")
             return False
 
@@ -277,9 +303,15 @@ class SnakePlayer(QObject):
         """发送棋盘更新信号"""
         try:
             self.board_updated.emit(
-                game_state, self.board,
-                self.convert_time, self.analyze_time, self.path_calc_time, self.draw_time,
-                self.time_since_last_frame, self.current_direction, self.current_path
+                game_state,
+                self.board,
+                self.convert_time,
+                self.analyze_time,
+                self.path_calc_time,
+                self.draw_time,
+                self.time_since_last_frame,
+                self.current_direction,
+                self.current_path,
             )
         except Exception as e:
             self.log_error("信号emit异常", e)
@@ -289,7 +321,9 @@ class SnakePlayer(QObject):
         if not self.current_path:
             return self.current_path
 
-        enemy_heads = [(c.col, c.row) for c in board.special_cells.get('enemy_head', [])]
+        enemy_heads = [
+            (c.col, c.row) for c in board.special_cells.get("enemy_head", [])
+        ]
 
         for pos in self.current_path[1:6]:
             if not self._is_safe_position(board, pos, enemy_heads):
@@ -301,16 +335,20 @@ class SnakePlayer(QObject):
         """检查位置是否安全"""
         x, y = pos
         cell_type = board.cells[y][x].cell_type
-        
+
         # 检查格子类型
         if cell_type not in self.SAFE_CELL_TYPES:
-            self.log_debug(f"[路径评估] 清空路径：遇到障碍物，位置({x},{y})，类型={cell_type}")
+            self.log_debug(
+                f"[路径评估] 清空路径：遇到障碍物，位置({x},{y})，类型={cell_type}"
+            )
             return False
 
         # 检查敌人距离
         for ex, ey in enemy_heads:
             if abs(x - ex) + abs(y - ey) < 1:
-                self.log_debug(f"[路径评估] 清空路径：敌人蛇头({ex},{ey})距离路径点({x},{y})过近")
+                self.log_debug(
+                    f"[路径评估] 清空路径：敌人蛇头({ex},{ey})距离路径点({x},{y})过近"
+                )
                 return False
 
         return True
@@ -330,8 +368,11 @@ class SnakePlayer(QObject):
 
         direction = self._calculate_direction(real_head, target)
         if direction:
-            self.snake_move(hwnd, direction, 
-                          reason=f"路径跟随：从({real_head[0]},{real_head[1]})到({target[0]},{target[1]})")
+            self.snake_move(
+                hwnd,
+                direction,
+                reason=f"路径跟随：从({real_head[0]},{real_head[1]})到({target[0]},{target[1]})",
+            )
 
     def _prepare_snake_control(self, hwnd) -> bool:
         """准备蛇的控制"""
@@ -346,12 +387,12 @@ class SnakePlayer(QObject):
 
         return True
 
-    def _get_snake_head(self) -> 'tuple|None':
+    def _get_snake_head(self) -> "tuple|None":
         """获取蛇头位置"""
         head_cell = self.board.special_cells.get("own_head", [None])[0]
         return (head_cell.col, head_cell.row) if head_cell else None
 
-    def _find_next_target(self, real_head: tuple) -> 'tuple|None':
+    def _find_next_target(self, real_head: tuple) -> "tuple|None":
         """找到下一个目标点"""
         for i, pos in enumerate(self.current_path):
             if self._is_adjacent(real_head, pos):
@@ -367,15 +408,19 @@ class SnakePlayer(QObject):
         dy = abs(pos1[1] - pos2[1])
         return (dx == 1 and dy == 0) or (dx == 0 and dy == 1)
 
-    def _calculate_direction(self, start: tuple, target: tuple) -> 'str|None':
+    def _calculate_direction(self, start: tuple, target: tuple) -> "str|None":
         """计算移动方向"""
         dx = target[0] - start[0]
         dy = target[1] - start[1]
 
-        if dx == 1: return "right"
-        if dx == -1: return "left"
-        if dy == 1: return "down"
-        if dy == -1: return "up"
+        if dx == 1:
+            return "right"
+        if dx == -1:
+            return "left"
+        if dy == 1:
+            return "down"
+        if dy == -1:
+            return "up"
         return None
 
     def snake_move(self, hwnd, direction: str, reason: str = ""):
@@ -394,7 +439,10 @@ class SnakePlayer(QObject):
 
     def _validate_move(self, direction: str) -> bool:
         """验证移动有效性"""
-        if not isinstance(direction, str) or direction.lower() not in self.VALID_DIRECTIONS:
+        if (
+            not isinstance(direction, str)
+            or direction.lower() not in self.VALID_DIRECTIONS
+        ):
             self.log_error(f"无效direction参数: {direction} ({type(direction)})")
             return False
         return True
@@ -404,12 +452,7 @@ class SnakePlayer(QObject):
         if not self.current_direction:
             return False
 
-        opposites = {
-            "left": "right",
-            "right": "left",
-            "up": "down",
-            "down": "up"
-        }
+        opposites = {"left": "right", "right": "left", "up": "down", "down": "up"}
         return opposites.get(self.current_direction) == direction
 
     def _execute_move(self, hwnd, direction: str, reason: str, now: float):
@@ -451,11 +494,13 @@ class SnakePlayer(QObject):
 
     def _can_predict_head(self) -> bool:
         """检查是否可以预测蛇头"""
-        return bool(self.last_time_control_snake_head and 
-                   self.current_direction and 
-                   self.last_direction_time)
+        return bool(
+            self.last_time_control_snake_head
+            and self.current_direction
+            and self.last_direction_time
+        )
 
-    def _calculate_predicted_position(self) -> 'tuple|None':
+    def _calculate_predicted_position(self) -> "tuple|None":
         """计算预测位置"""
         elapsed_time = time.time() - self.last_direction_time
         steps = int(elapsed_time / 0.2)
@@ -465,7 +510,7 @@ class SnakePlayer(QObject):
             "up": (0, -1),
             "down": (0, 1),
             "left": (-1, 0),
-            "right": (1, 0)
+            "right": (1, 0),
         }
         dx, dy = direction_vectors.get(self.current_direction, (0, 0))
 
@@ -486,7 +531,8 @@ class SnakePlayer(QObject):
             board.special_cells["own_head"] = []
 
         board.special_cells["own_head"] = [
-            c for c in board.special_cells["own_head"]
+            c
+            for c in board.special_cells["own_head"]
             if not (c.row == cell.row and c.col == cell.col)
         ]
         board.special_cells["own_head"].append(cell)
@@ -494,7 +540,7 @@ class SnakePlayer(QObject):
     def find_new_path(self, emergency: bool = False):
         """寻找新路径"""
         self._calc_start = time.time()
-        
+
         if not emergency:
             path = self._try_normal_path()
             if path:
@@ -506,14 +552,14 @@ class SnakePlayer(QObject):
 
         return self.current_path
 
-    def _try_normal_path(self) -> 'list|None':
+    def _try_normal_path(self) -> "list|None":
         """尝试常规路径"""
         best_path = self.path_finder.find_path_in_order(self.board)
         if best_path and len(best_path) > 1:
             return self._update_path_and_emit(best_path)
         return None
 
-    def _try_escape_path(self) -> 'list|None':
+    def _try_escape_path(self) -> "list|None":
         """尝试逃生路径"""
         escape_path = self.path_finder.find_path_to_nearest_empty(self.board)
         if escape_path and len(escape_path) > 1:
@@ -530,9 +576,15 @@ class SnakePlayer(QObject):
     def _emit_path_update(self):
         """发送路径更新信号"""
         self.board_updated.emit(
-            "running", self.board,
-            self.convert_time, self.analyze_time, self.path_calc_time, self.draw_time,
-            self.time_since_last_frame, self.current_direction, self.current_path
+            "running",
+            self.board,
+            self.convert_time,
+            self.analyze_time,
+            self.path_calc_time,
+            self.draw_time,
+            self.time_since_last_frame,
+            self.current_direction,
+            self.current_path,
         )
 
     def log_error(self, message: str, e: Exception = None):
@@ -554,13 +606,8 @@ class SnakePlayer(QObject):
         # 获取周围可用方向
         available_directions = []
         x, y = head_pos
-        directions = {
-            "up": (0, -1),
-            "down": (0, 1),
-            "left": (-1, 0),
-            "right": (1, 0)
-        }
-        
+        directions = {"up": (0, -1), "down": (0, 1), "left": (-1, 0), "right": (1, 0)}
+
         # 检查四个方向
         for direction, (dx, dy) in directions.items():
             new_x, new_y = x + dx, y + dy
@@ -569,7 +616,7 @@ class SnakePlayer(QObject):
                 # 检查该位置是否安全
                 if self.board.cells[new_y][new_x].cell_type in self.SAFE_CELL_TYPES:
                     available_directions.append(direction)
-        
+
         # 如果有可用方向，随机选择一个
         if available_directions:
             direction = available_directions[0]  # 选择第一个可用方向

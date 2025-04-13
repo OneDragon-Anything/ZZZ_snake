@@ -4,11 +4,10 @@ from qfluentwidgets import FluentWindow
 
 from view.card.snake_card import SnakeGameCard
 from view.card.board_analyzer_test_card import BoardAnalyzerTestCard
-from view.card.settings_card import SettingsCard   # 新增导入
+from view.card.settings_card import SettingsCard  # 新增导入
 from view.card.template_card import TemplateCard
-from qfluentwidgets import (
-    FluentIcon, NavigationItemPosition
-)
+from qfluentwidgets import FluentIcon, NavigationItemPosition
+
 
 class MainWindow(FluentWindow):
     def __init__(self):
@@ -29,7 +28,7 @@ class MainWindow(FluentWindow):
         self.game_widget = SnakeGameCard(snake_player_thread=self.snake_player_thread)
 
         self.board_analyzer_widget = BoardAnalyzerTestCard()
-        
+
         self.template_card = TemplateCard()
 
         # 传递日志logger给设置界面
@@ -38,27 +37,27 @@ class MainWindow(FluentWindow):
         self.addSubInterface(
             self.game_widget,
             FluentIcon.LIBRARY,
-            'game',
-            position=NavigationItemPosition.TOP
+            "game",
+            position=NavigationItemPosition.TOP,
         )
         self.addSubInterface(
             self.board_analyzer_widget,
             FluentIcon.ALBUM,
-            'board_analyzer',
-            position=NavigationItemPosition.TOP
+            "board_analyzer",
+            position=NavigationItemPosition.TOP,
         )
         self.addSubInterface(
             self.settings_card,
             FluentIcon.SETTING,
-            'settings',
-            position=NavigationItemPosition.BOTTOM
+            "settings",
+            position=NavigationItemPosition.BOTTOM,
         )
-        
+
         self.addSubInterface(
             self.template_card,
             FluentIcon.PHOTO,
-            'template',
-            position=NavigationItemPosition.TOP
+            "template",
+            position=NavigationItemPosition.TOP,
         )
 
     def _initNavigation(self):
@@ -81,6 +80,7 @@ class MainWindow(FluentWindow):
             if self.game_widget.btn_snake_player.isChecked():
                 self.game_widget.btn_snake_player.setChecked(False)
                 # onSnakePlayerToggled会被自动调用，不需要手动停止线程
+
 
 if __name__ == "__main__":
     app = QApplication(sys.argv)

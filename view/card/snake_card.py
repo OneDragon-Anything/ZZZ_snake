@@ -5,7 +5,12 @@ from PyQt5.QtGui import QImage, QPixmap
 from PyQt5.QtWidgets import QFrame, QHBoxLayout, QVBoxLayout, QLabel
 from PyQt5.QtWidgets import QSizePolicy
 from qfluentwidgets import (
-    BodyLabel, CaptionLabel, TextBrowser, SwitchButton, InfoBadge, PrimaryPushButton
+    BodyLabel,
+    CaptionLabel,
+    TextBrowser,
+    SwitchButton,
+    InfoBadge,
+    PrimaryPushButton,
 )
 import os
 from log.log import SnakeLogger
@@ -16,7 +21,7 @@ from log.debug_helper import DebugHelper  # 新增导入
 class SnakeGameCard(QFrame):
     def __init__(self, snake_player_thread=None, parent=None):
         super().__init__(parent)
-        self.setObjectName('SnakeGameCard')
+        self.setObjectName("SnakeGameCard")
         self.snake_player_thread = snake_player_thread
 
         # 主布局
@@ -33,14 +38,16 @@ class SnakeGameCard(QFrame):
         self.screen_label = QLabel()
         self.screen_label.setAlignment(Qt.AlignCenter)
         self.screen_label.setFixedSize(500, 500)
-        self.screen_label.setStyleSheet("""
+        self.screen_label.setStyleSheet(
+            """
             QLabel {
                 border-radius: 8px;
                 background-color: black;
                 min-width: 500px;
                 min-height: 500px;
             }
-        """)
+        """
+        )
 
         # 按钮：显示分析开关
         self.btn_show_analysis = SwitchButton(parent=self)
@@ -50,7 +57,7 @@ class SnakeGameCard(QFrame):
         # 按钮：蛇玩家自动控制开关
         self.btn_snake_player = SwitchButton(parent=self)
         self.btn_snake_player.setChecked(False)
-        self.btn_snake_player.setText('启用蛇玩家')
+        self.btn_snake_player.setText("启用蛇玩家")
         self.btn_snake_player.checkedChanged.connect(self.onSnakePlayerToggled)
 
         # 状态文本
@@ -81,15 +88,17 @@ class SnakeGameCard(QFrame):
         self.status_bar_layout.addWidget(self.game_state_label)
 
         self.status_bar_container = QFrame()
-        self.status_bar_container.setObjectName('StatusBarFrame')
+        self.status_bar_container.setObjectName("StatusBarFrame")
         self.status_bar_container.setLayout(self.status_bar_layout)
-        self.status_bar_container.setStyleSheet("""
+        self.status_bar_container.setStyleSheet(
+            """
             #StatusBarFrame {
                 background-color: transparent;
                 border-top: 1px solid #d0d0d0;
                 padding: 3px 0;  /* 从6px改为3px，减小上下内边距 */
             }
-        """)
+        """
+        )
         # ===== END =====
 
         # 性能信息展示
@@ -100,8 +109,10 @@ class SnakeGameCard(QFrame):
         self.draw_time_badge = InfoBadge.custom("绘制: 0.000s", "#6600cc", "#ffffff")
         self.player_time_badge = InfoBadge.custom("循环: 0.000s", "#6699cc", "#ffffff")
         self.snake_direction_badge = InfoBadge.custom("方向: 无", "#cc3300", "#ffffff")
-        
-        self.snake_pos_badge = InfoBadge.custom("坐标: 无", "#333399", "#ffffff")   # 新增蛇头和下一步坐标标签
+
+        self.snake_pos_badge = InfoBadge.custom(
+            "坐标: 无", "#333399", "#ffffff"
+        )  # 新增蛇头和下一步坐标标签
 
         # self.performance_layout.addWidget(self.convert_time_badge)
         self.performance_layout.addWidget(self.analyze_time_badge)
@@ -109,7 +120,7 @@ class SnakeGameCard(QFrame):
         # self.performance_layout.addWidget(self.draw_time_badge)
         self.performance_layout.addWidget(self.player_time_badge)
         # self.performance_layout.addWidget(self.snake_direction_badge)
-        self.performance_layout.addWidget(self.snake_pos_badge)    # 新增加入性能信息栏
+        self.performance_layout.addWidget(self.snake_pos_badge)  # 新增加入性能信息栏
         self.performance_layout.setSpacing(10)
         self.performance_layout.setAlignment(Qt.AlignCenter)
 
@@ -157,14 +168,19 @@ class SnakeGameCard(QFrame):
         self.last_label_size = self.screen_label.size()
 
         # 调试图片保存目录
-        self.debug_images_dir = os.path.join(os.path.dirname(__file__), '.debug', 'images')
+        self.debug_images_dir = os.path.join(
+            os.path.dirname(__file__), ".debug", "images"
+        )
         os.makedirs(self.debug_images_dir, exist_ok=True)
 
     def _start_batch_screenshot(self):
         """
         一次性保存缓存的5张历史截图
         """
-        if not (self.snake_player_thread and hasattr(self.snake_player_thread.snake_player, 'cache_images')):
+        if not (
+            self.snake_player_thread
+            and hasattr(self.snake_player_thread.snake_player, "cache_images")
+        ):
             self.logger.warning("无缓存数组，无法保存")
             return
 
@@ -175,11 +191,13 @@ class SnakeGameCard(QFrame):
                 try:
                     # 复制OpenCV图像为BGR格式保存
                     bgr_img = img
-                    saved_path = DebugHelper.save_image(bgr_img, prefix=f'snake_cache_{idx}')
+                    saved_path = DebugHelper.save_image(
+                        bgr_img, prefix=f"snake_cache_{idx}"
+                    )
                     if saved_path:
                         filename = os.path.basename(saved_path)
                         self.logger.info(f"已保存缓存第{idx+1}张: {filename}")
-                        saved_count +=1
+                        saved_count += 1
                     else:
                         self.logger.error(f"缓存第{idx+1}张保存失败：返回空路径")
                 except Exception as e:
@@ -189,16 +207,18 @@ class SnakeGameCard(QFrame):
 
         self.logger.info(f"缓存截图保存完成，共保存 {saved_count}/5 张")
 
-
     def _batch_screenshot_tick(self):
         """
         定时器槽函数，保存截图
         """
-        if self.snake_player_thread and self.snake_player_thread.snake_player.cached_screen is not None:
+        if (
+            self.snake_player_thread
+            and self.snake_player_thread.snake_player.cached_screen is not None
+        ):
             try:
                 rgb_img = np.array(self.snake_player_thread.snake_player.cached_screen)
                 bgr_img = cv2.cvtColor(rgb_img, cv2.COLOR_RGB2BGR)
-                saved_path = DebugHelper.save_image(bgr_img, prefix='snake')
+                saved_path = DebugHelper.save_image(bgr_img, prefix="snake")
                 if saved_path:
                     filename = os.path.basename(saved_path)
                     self.logger.info(f"截图已保存: {filename}")
@@ -215,7 +235,18 @@ class SnakeGameCard(QFrame):
             self.logger.info("连续3张截图完成")
 
     @pyqtSlot(object, object, float, float, float, float, float, str, object)
-    def on_board_updated(self, game_status, board, image_convert_time, analysis_time, path_find_time, render_time,flash_time, snake_direction, path):
+    def on_board_updated(
+        self,
+        game_status,
+        board,
+        image_convert_time,
+        analysis_time,
+        path_find_time,
+        render_time,
+        flash_time,
+        snake_direction,
+        path,
+    ):
         if game_status:
             self.game_state_label.setText(f"棋盘: {game_status}")
 
@@ -224,11 +255,17 @@ class SnakeGameCard(QFrame):
         self.path_time_badge.setText(f"寻路: {path_find_time:.3f}s")
         self.draw_time_badge.setText(f"绘制: {render_time:.3f}s")
         self.player_time_badge.setText(f"循环: {flash_time:.3f}s")
-        self.snake_direction_badge.setText(f"方向: {snake_direction if snake_direction else '无'}")
-        
+        self.snake_direction_badge.setText(
+            f"方向: {snake_direction if snake_direction else '无'}"
+        )
+
         # 新增：更新蛇头和路径前两个节点的坐标显示
         real_head_text = "无"
-        if board and "own_head" in board.special_cells and board.special_cells["own_head"]:
+        if (
+            board
+            and "own_head" in board.special_cells
+            and board.special_cells["own_head"]
+        ):
             cell = board.special_cells["own_head"][0]
             real_head_text = f"({cell.col},{cell.row})"
 
@@ -244,7 +281,7 @@ class SnakeGameCard(QFrame):
             path_text = "无"
 
         self.snake_pos_badge.setText(f"蛇头:{real_head_text} 路径:{path_text}")
-        
+
         if board:
             try:
                 draw_img = self.map_drawer.draw_map(board, path)
@@ -252,14 +289,18 @@ class SnakeGameCard(QFrame):
                 height, width = draw_img.shape[:2]
                 bytes_per_line = 3 * width
                 rgb_img = cv2.cvtColor(draw_img, cv2.COLOR_BGR2RGB)
-                q_img = QImage(rgb_img.data, width, height, bytes_per_line, QImage.Format_RGB888)
+                q_img = QImage(
+                    rgb_img.data, width, height, bytes_per_line, QImage.Format_RGB888
+                )
 
                 pixmap = QPixmap.fromImage(q_img)
                 label_size = self.screen_label.size()
 
                 scaled_pixmap = pixmap.scaled(
-                    label_size.width(), label_size.height(),
-                    Qt.KeepAspectRatio, Qt.SmoothTransformation
+                    label_size.width(),
+                    label_size.height(),
+                    Qt.KeepAspectRatio,
+                    Qt.SmoothTransformation,
                 )
                 self.screen_label.setPixmap(scaled_pixmap)
 
@@ -278,7 +319,7 @@ class SnakeGameCard(QFrame):
         处理流程：
             - 修改按钮文字
         """
-        text = '开启分析' if isChecked else '关闭分析'
+        text = "开启分析" if isChecked else "关闭分析"
         self.btn_show_analysis.setText(text)
 
     def onSnakePlayerToggled(self, isChecked):
@@ -296,20 +337,27 @@ class SnakeGameCard(QFrame):
             - 初始化蛇玩家线程
             - 根据开关启停线程
         """
-        text = '停用蛇玩家' if isChecked else '启用蛇玩家'
+        text = "停用蛇玩家" if isChecked else "启用蛇玩家"
         self.btn_snake_player.setText(text)
         self.logger.info("切换了蛇玩家开关")
 
         if self.snake_player_thread:
             if isChecked:
                 import win32gui
+
                 hwnd = win32gui.FindWindow(None, "绝区零")
                 if hwnd:
                     self.snake_player_thread.set_hwnd(hwnd)
                     self.snake_player_thread.snake_player.logger = self.logger
-                    self.snake_player_thread.snake_player.board_analyzer.logger = self.logger
-                    self.snake_player_thread.snake_player.path_finder.logger = self.logger
-                    self.snake_player_thread.snake_player.snake_controller.logger = self.logger
+                    self.snake_player_thread.snake_player.board_analyzer.logger = (
+                        self.logger
+                    )
+                    self.snake_player_thread.snake_player.path_finder.logger = (
+                        self.logger
+                    )
+                    self.snake_player_thread.snake_player.snake_controller.logger = (
+                        self.logger
+                    )
                     if not self.snake_player_thread.isRunning():
                         self.snake_player_thread.start()
                     self.logger.info("蛇玩家线程已启动")

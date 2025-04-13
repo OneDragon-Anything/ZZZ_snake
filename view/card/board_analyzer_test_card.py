@@ -1,10 +1,22 @@
 import cv2
 import numpy as np
-from PyQt5.QtWidgets import QWidget, QLabel, QFileDialog, QVBoxLayout, QFrame, QHBoxLayout
+from PyQt5.QtWidgets import (
+    QWidget,
+    QLabel,
+    QFileDialog,
+    QVBoxLayout,
+    QFrame,
+    QHBoxLayout,
+)
 from PyQt5.QtCore import Qt
 from PyQt5.QtGui import QImage, QPixmap
 from qfluentwidgets import (
-    TitleLabel, TextEdit, PrimaryPushButton, SwitchButton, LineEdit, FluentIcon
+    TitleLabel,
+    TextEdit,
+    PrimaryPushButton,
+    SwitchButton,
+    LineEdit,
+    FluentIcon,
 )
 from log.log import SnakeLogger
 from model.snake_board import Board
@@ -13,11 +25,13 @@ from drawer.map_drawer import MapDrawer
 from analyzer.path_finder import PathFinder
 from PyQt5.QtWidgets import QSizePolicy
 
+
 class ImageCard(QFrame):
     def __init__(self, width=500, height=500, parent=None):
         super().__init__(parent)
         self.setObjectName("ImageCard")
-        self.setStyleSheet("""
+        self.setStyleSheet(
+            """
             QFrame#ImageCard {
                 border: 1px solid #cccccc;
                 border-radius: 12px;
@@ -27,22 +41,17 @@ class ImageCard(QFrame):
                 border: none;
                 background-color: transparent;
             }
-        """)
-        self.setMinimumSize(200, 200)
-        self.setSizePolicy(
-            QSizePolicy.Expanding,
-            QSizePolicy.Expanding
+        """
         )
+        self.setMinimumSize(200, 200)
+        self.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(5, 5, 5, 5)
 
         self.label = QLabel()
         self.label.setAlignment(Qt.AlignCenter)
-        self.label.setSizePolicy(
-            QSizePolicy.Expanding,
-            QSizePolicy.Expanding
-        )
+        self.label.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
         layout.addWidget(self.label)
 
     def setPixmap(self, pixmap):
@@ -51,11 +60,12 @@ class ImageCard(QFrame):
     def clear(self):
         self.label.clear()
 
+
 class BoardAnalyzerTestCard(QWidget):
     def __init__(self):
         super().__init__()
-        self.setObjectName('subInterface_board_analyzer')
-        self.setWindowTitle('棋盘分析测试')
+        self.setObjectName("subInterface_board_analyzer")
+        self.setWindowTitle("棋盘分析测试")
         self.resize(500, 1000)
 
         self.title = QLabel("棋盘识别与路径测试")
@@ -66,36 +76,35 @@ class BoardAnalyzerTestCard(QWidget):
         self.info_label = TextEdit()
         self.info_label.setReadOnly(True)
         self.info_label.setMinimumHeight(100)
-        self.info_label.setSizePolicy(
-            QSizePolicy.Expanding,
-            QSizePolicy.Expanding
-        )
-        self.info_label.setStyleSheet("""
+        self.info_label.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
+        self.info_label.setStyleSheet(
+            """
             TextEdit {
                 border: 1px solid #ccc;
                 border-radius: 8px;
                 background-color: transparent;
             }
-        """)
+        """
+        )
 
-        self.open_button = PrimaryPushButton('打开图像')
+        self.open_button = PrimaryPushButton("打开图像")
         self.open_button.clicked.connect(self.open_image)
 
-        self.direction_button = PrimaryPushButton('切换方向: 无')
+        self.direction_button = PrimaryPushButton("切换方向: 无")
         self.direction_button.clicked.connect(self.cycle_direction)
-        self.directions = ['up', 'down', 'left', 'right']
+        self.directions = ["up", "down", "left", "right"]
         self.current_direction_index = -1
         self.current_direction = None
 
         # 新增检测蛇眼按钮
-        self.detect_eye_button = PrimaryPushButton('检测蛇眼')
+        self.detect_eye_button = PrimaryPushButton("检测蛇眼")
         self.detect_eye_button.clicked.connect(self.detect_snake_eye_show)
 
-        self.path_finding_switch = SwitchButton('开启寻路')
+        self.path_finding_switch = SwitchButton("开启寻路")
         self.path_finding_switch.setChecked(True)
 
         # 新增HSV容差输入框和过滤区域按钮
-        self.filter_button = PrimaryPushButton('过滤区域')
+        self.filter_button = PrimaryPushButton("过滤区域")
         self.filter_button.setIcon(FluentIcon.FILTER)
         self.filter_button.clicked.connect(self.filter_hsv_mask)
         self.h_range_input = LineEdit()
@@ -138,7 +147,9 @@ class BoardAnalyzerTestCard(QWidget):
         self.current_board = None
 
     def cycle_direction(self):
-        self.current_direction_index = (self.current_direction_index + 1) % len(self.directions)
+        self.current_direction_index = (self.current_direction_index + 1) % len(
+            self.directions
+        )
         self.current_direction = self.directions[self.current_direction_index]
         self.direction_button.setText(f"切换方向: {self.current_direction}")
         if self.current_hsv is not None:
@@ -161,9 +172,9 @@ class BoardAnalyzerTestCard(QWidget):
         hsv_img = self.current_hsv
         bgr_img = cv2.cvtColor(hsv_img, cv2.COLOR_HSV2BGR).copy()
 
-        for (cx, cy) in eyes:
+        for cx, cy in eyes:
             # 绘制绿色中心点
-            cv2.circle(bgr_img, (int(cx), int(cy)), 4, (0,255,0), -1)
+            cv2.circle(bgr_img, (int(cx), int(cy)), 4, (0, 255, 0), -1)
             # 外圈红色圆
             cv2.circle(bgr_img, (int(cx), int(cy)), 10, (0, 0, 255), 2)
 
@@ -177,7 +188,7 @@ class BoardAnalyzerTestCard(QWidget):
             self.image_card.label.width(),
             self.image_card.label.height(),
             Qt.KeepAspectRatio,
-            Qt.SmoothTransformation
+            Qt.SmoothTransformation,
         )
         self.image_card.setPixmap(scaled_pixmap)
 
@@ -188,17 +199,18 @@ class BoardAnalyzerTestCard(QWidget):
             self.zoom_factor = max(0.1, min(5.0, self.zoom_factor))
             scaled_size = self.current_pixmap.size() * self.zoom_factor
             scaled_pixmap = self.current_pixmap.scaled(
-                scaled_size,
-                Qt.KeepAspectRatio,
-                Qt.SmoothTransformation
+                scaled_size, Qt.KeepAspectRatio, Qt.SmoothTransformation
             )
             self.image_card.setPixmap(scaled_pixmap)
 
     def open_image(self):
-        file_path, _ = QFileDialog.getOpenFileName(self, "打开图像", "", "Images (*.png *.jpg *.jpeg *.bmp)")
+        file_path, _ = QFileDialog.getOpenFileName(
+            self, "打开图像", "", "Images (*.png *.jpg *.jpeg *.bmp)"
+        )
         if not file_path:
             return
         import time
+
         read_start = time.time()
         image = cv2.imread(file_path)
         read_end = time.time()
@@ -228,11 +240,14 @@ class BoardAnalyzerTestCard(QWidget):
 
     def _analyze_and_draw(self, hsv):
         import time
-        board = Board(rows=25, cols=29, image=hsv, image_format='HSV')
+
+        board = Board(rows=25, cols=29, image=hsv, image_format="HSV")
 
         analyze_start = time.time()
         self.logger.debug(f"当前方向是: {self.current_direction}")
-        board = self.analyzer.analyze_board(board, self.current_hsv, 'HSV', self.current_direction)
+        board = self.analyzer.analyze_board(
+            board, self.current_hsv, "HSV", self.current_direction
+        )
         analyze_end = time.time()
 
         path = None
@@ -252,7 +267,9 @@ class BoardAnalyzerTestCard(QWidget):
         h_img, w_img = drawn_image.shape[:2]
         bytes_per_line = 3 * w_img
         rgb_image = cv2.cvtColor(drawn_image, cv2.COLOR_BGR2RGB)
-        q_img = QImage(rgb_image.data, w_img, h_img, bytes_per_line, QImage.Format_RGB888)
+        q_img = QImage(
+            rgb_image.data, w_img, h_img, bytes_per_line, QImage.Format_RGB888
+        )
         self.current_pixmap = QPixmap.fromImage(q_img)
 
         width_ratio = self.image_card.label.width() / self.current_pixmap.width()
@@ -263,7 +280,7 @@ class BoardAnalyzerTestCard(QWidget):
             self.image_card.label.width(),
             self.image_card.label.height(),
             Qt.KeepAspectRatio,
-            Qt.SmoothTransformation
+            Qt.SmoothTransformation,
         )
         self.image_card.setPixmap(scaled_pixmap)
 
@@ -297,17 +314,21 @@ class BoardAnalyzerTestCard(QWidget):
             return
 
         target_h, target_s, target_v = self.analyzer.grid_colors_hsv["own_head"]
-        target_h, target_s, target_v =  [0,0,255]
-        lower = np.array([
-            max(0, target_h - h_tol),
-            max(0, target_s - s_tol),
-            max(0, target_v - v_tol)
-        ])
-        upper = np.array([
-            min(179, target_h + h_tol),
-            min(255, target_s + s_tol),
-            min(255, target_v + v_tol)
-        ])
+        target_h, target_s, target_v = [0, 0, 255]
+        lower = np.array(
+            [
+                max(0, target_h - h_tol),
+                max(0, target_s - s_tol),
+                max(0, target_v - v_tol),
+            ]
+        )
+        upper = np.array(
+            [
+                min(179, target_h + h_tol),
+                min(255, target_s + s_tol),
+                min(255, target_v + v_tol),
+            ]
+        )
 
         mask = cv2.inRange(self.current_hsv, lower, upper)
 
@@ -333,33 +354,47 @@ class BoardAnalyzerTestCard(QWidget):
 
             edge_point = None
             dir = self.current_direction
-            if dir == 'up':
+            if dir == "up":
                 edge_point = up_point
-            elif dir == 'down':
+            elif dir == "down":
                 edge_point = down_point
-            elif dir == 'left':
+            elif dir == "left":
                 edge_point = left_point
-            elif dir == 'right':
+            elif dir == "right":
                 edge_point = right_point
 
             if edge_point is not None:
                 color = (0, 0, 255)
                 radius = 15
                 thickness = 15
-                cv2.line(color_img, (edge_point[0] - radius, edge_point[1]), (edge_point[0] + radius, edge_point[1]), color, thickness)
-                cv2.line(color_img, (edge_point[0], edge_point[1] - radius), (edge_point[0], edge_point[1] + radius), color, thickness)
+                cv2.line(
+                    color_img,
+                    (edge_point[0] - radius, edge_point[1]),
+                    (edge_point[0] + radius, edge_point[1]),
+                    color,
+                    thickness,
+                )
+                cv2.line(
+                    color_img,
+                    (edge_point[0], edge_point[1] - radius),
+                    (edge_point[0], edge_point[1] + radius),
+                    color,
+                    thickness,
+                )
                 self.logger.info(f"{dir}方向选中的边缘点坐标: {edge_point}")
 
         h_img, w_img = color_img.shape[:2]
         bytes_per_line = 3 * w_img
         rgb_image = cv2.cvtColor(color_img, cv2.COLOR_BGR2RGB)
-        q_img = QImage(rgb_image.data, w_img, h_img, bytes_per_line, QImage.Format_RGB888)
+        q_img = QImage(
+            rgb_image.data, w_img, h_img, bytes_per_line, QImage.Format_RGB888
+        )
         pixmap = QPixmap.fromImage(q_img)
         scaled_pixmap = pixmap.scaled(
             self.image_card.label.width(),
             self.image_card.label.height(),
             Qt.KeepAspectRatio,
-            Qt.SmoothTransformation
+            Qt.SmoothTransformation,
         )
         self.current_pixmap = pixmap
         self.zoom_factor = 1.0
@@ -400,14 +435,16 @@ class BoardAnalyzerTestCard(QWidget):
             cell = self.current_board.cells[row][col]
             if cell:
                 info = f"格子: 行{row+1} 列{col+1}\n类型: {cell.cell_type}\n中心: {cell.center}\n"
-                if hasattr(cell, 'center_color') and cell.center_color is not None:
+                if hasattr(cell, "center_color") and cell.center_color is not None:
                     info += f"HSV中心色: {cell.center_color}\n"
-                if hasattr(cell, 'color_dict') and cell.color_dict:
+                if hasattr(cell, "color_dict") and cell.color_dict:
                     info += "颜色统计:\n"
-                    sorted_colors = sorted(cell.color_dict.items(), key=lambda x: x[1], reverse=True)
+                    sorted_colors = sorted(
+                        cell.color_dict.items(), key=lambda x: x[1], reverse=True
+                    )
                     for k, v in sorted_colors:
                         info += f"  {k}: {v}\n"
-                if hasattr(cell, 'bounds'):
+                if hasattr(cell, "bounds"):
                     info += f"边界: {cell.bounds}\n"
 
                 # 新增: 输出该像素点击的HSV值
@@ -421,11 +458,15 @@ class BoardAnalyzerTestCard(QWidget):
                         info += f"点击像素HSV值: ({hsv_val[0]}, {hsv_val[1]}, {hsv_val[2]})\n"
 
                 self.info_label.setText(info)
-                self.info_label.verticalScrollBar().setValue(self.info_label.verticalScrollBar().maximum())
-                
-if __name__ == '__main__':
+                self.info_label.verticalScrollBar().setValue(
+                    self.info_label.verticalScrollBar().maximum()
+                )
+
+
+if __name__ == "__main__":
     from PyQt5.QtWidgets import QApplication
     import sys
+
     app = QApplication(sys.argv)
     w = BoardAnalyzerTestCard()
     w.show()

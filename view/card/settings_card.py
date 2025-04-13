@@ -1,13 +1,14 @@
 from PyQt5.QtWidgets import QWidget, QVBoxLayout, QLabel
-from PyQt5.QtCore import Qt   # 新增的导入
+from PyQt5.QtCore import Qt  # 新增的导入
 from qfluentwidgets import TitleLabel, ComboBox, Theme
 import os
 import view.card.theme_manager as theme_manager  # 添加导入
 
+
 class SettingsCard(QWidget):
     def __init__(self, logger):
         super().__init__()
-        self.setObjectName("settingsCard")   # <=== 新增，必须有唯一不为空对象名
+        self.setObjectName("settingsCard")  # <=== 新增，必须有唯一不为空对象名
         self.logger = logger
         layout = QVBoxLayout(self)
         layout.setAlignment(Qt.AlignTop | Qt.AlignLeft)
@@ -29,7 +30,10 @@ class SettingsCard(QWidget):
         self.theme_combo = ComboBox()
         self.theme_combo.addItems(["浅色", "深色"])
 
-        if hasattr(theme_manager, "current_theme") and theme_manager.current_theme == Theme.DARK:
+        if (
+            hasattr(theme_manager, "current_theme")
+            and theme_manager.current_theme == Theme.DARK
+        ):
             self.theme_combo.setCurrentText("深色")
         else:
             self.theme_combo.setCurrentText("浅色")
