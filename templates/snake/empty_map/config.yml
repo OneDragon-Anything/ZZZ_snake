@@ -1,0 +1,10 @@
+area_diff: 0.3
+crop_area: 1,0,946,824
+frame_id: snake
+hsv_color: 93,100,255
+hsv_diff: 4,255,50
+image_path: ''
+shape_diff: 0.3
+shape_type: circle
+template_id: empty_map
+template_name: 空白地图

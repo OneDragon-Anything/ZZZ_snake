@@ -2,6 +2,7 @@ from collections import deque
 import random
 import heapq
 import time
+import numpy as np
 from PyQt5.QtCore import QObject, pyqtSignal
 
 
@@ -24,70 +25,91 @@ class PathFinder(QObject):
         self.start_pos = None  # 起始位置
         self.current_direction = "right"  # 当前方向
         self.logger = logger  # 日志记录器
-        # 高风险区域（敌方蛇头附近1格）和低风险区域（敌方身体附近1格）
-        self.high_risk_areas = set()
-        self.low_risk_areas = set()
-        self.mid_risk_areas = set()
+        # 使用NumPy数组存储风险分数，替代字典和集合
+        self.risk_array = np.zeros((self.grid_height + 2, self.grid_width + 2), dtype=np.float32)
+        # 定义方向向量数组，用于邻居计算
+        self.directions = np.array([(0, -1), (0, 1), (-1, 0), (1, 0)], dtype=np.int32)
 
     def update_risk_areas(self, board):
-        # 改为字典存储每个格子的风险分数
+        # 重置风险数组
+        self.risk_array.fill(0)
+        
+        # 为了兼容现有代码，保留字典接口
         self.risk_scores = {}
-
-        # === 标记地图边缘为高风险 ===
-        for x in range(self.grid_width):
-            self._add_risk_score((x, 0), 9)
-            self._add_risk_score((x, self.grid_height - 1), 9)
-        for y in range(self.grid_height):
-            self._add_risk_score((0, y), 9)
-            self._add_risk_score((self.grid_width - 1, y), 9)
-
+        
+        # === 使用NumPy向量化操作标记地图边缘为高风险 ===
+        # 上下边缘
+        self.risk_array[1, 1:self.grid_width+1] += 9  # 上边缘
+        self.risk_array[self.grid_height, 1:self.grid_width+1] += 9  # 下边缘
+        # 左右边缘
+        self.risk_array[1:self.grid_height+1, 1] += 9  # 左边缘
+        self.risk_array[1:self.grid_height+1, self.grid_width] += 9  # 右边缘
+        
         # === 标记地图边缘外一格为中风险 ===
-        for x in range(-1, self.grid_width + 1):
-            self._add_risk_score((x, -1), 3)
-            self._add_risk_score((x, self.grid_height), 3)
-        for y in range(-1, self.grid_height + 1):
-            self._add_risk_score((-1, y), 3)
-            self._add_risk_score((self.grid_width, y), 3)
-
-        # 标记敌方蛇头周围1格为高风险
-        for key in ["enemy_head", "mine", "unknow"]:
-            if key in board.special_cells:
-                for cell in board.special_cells[key]:
-                    x, y = cell.col, cell.row
-                    for dx, dy in [(0, -1), (0, 1), (-1, 0), (1, 0)]:
-                        nx, ny = x + dx, y + dy
-                        if 0 <= nx < self.grid_width and 0 <= ny < self.grid_height:
-                            self._add_risk_score((nx, ny), 9)
-
-        # 敌方蛇身附近1格为中风险
-        if "enemy_body" in board.special_cells:
-            for cell in board.special_cells["enemy_body"]:
-                x, y = cell.col, cell.row
-                for dx, dy in [(0, -1), (0, 1), (-1, 0), (1, 0)]:
-                    nx, ny = x + dx, y + dy
-                    if 0 <= nx < self.grid_width and 0 <= ny < self.grid_height:
-                        self._add_risk_score((nx, ny), 3)
-
-        # 自己蛇身附近1格为低风险
+        # 外部边缘
+        self.risk_array[0, :] += 3  # 上外边缘
+        self.risk_array[self.grid_height+1, :] += 3  # 下外边缘
+        self.risk_array[:, 0] += 3  # 左外边缘
+        self.risk_array[:, self.grid_width+1] += 3  # 右外边缘
+        
+        # 预处理特殊单元格坐标
+        def process_cells(cell_type, risk_value):
+            if cell_type in board.special_cells:
+                cells = board.special_cells[cell_type]
+                if not cells:
+                    return
+                    
+                # 提取所有单元格的坐标
+                coords = np.array([(cell.col, cell.row) for cell in cells])
+                if len(coords) == 0:
+                    return
+                    
+                # 为每个坐标生成4个邻居坐标
+                for dx, dy in self.directions:
+                    # 计算邻居坐标
+                    neighbors = coords + np.array([dx, dy])
+                    
+                    # 过滤有效的邻居坐标
+                    valid_mask = (neighbors[:, 0] >= 0) & (neighbors[:, 0] < self.grid_width) & \
+                                (neighbors[:, 1] >= 0) & (neighbors[:, 1] < self.grid_height)
+                    valid_neighbors = neighbors[valid_mask]
+                    
+                    # 更新风险值
+                    for nx, ny in valid_neighbors:
+                        self.risk_array[ny+1, nx+1] += risk_value
+        
+        # 处理高风险区域 - 敌方蛇头、地雷等周围
+        for key in ["enemy_head", "mine", "unknown"]:
+            process_cells(key, 9)
+            
+        # 处理中风险区域 - 敌方蛇身周围
+        process_cells("enemy_body", 3)
+        
+        # 处理低风险区域 - 自己蛇身周围
         for key in ["own_body", "greed_speed"]:
-            if key in board.special_cells:
-                for cell in board.special_cells[key]:
-                    x, y = cell.col, cell.row
-                    for dx, dy in [(0, -1), (0, 1), (-1, 0), (1, 0)]:
-                        nx, ny = x + dx, y + dy
-                        if 0 <= nx < self.grid_width and 0 <= ny < self.grid_height:
-                            self._add_risk_score((nx, ny), 1)
+            process_cells(key, 1)
+            
+        # 将NumPy数组的值同步到字典中以保持兼容性
+        for y in range(self.grid_height):
+            for x in range(self.grid_width):
+                risk_value = self.risk_array[y+1, x+1]
+                if risk_value > 0:
+                    self.risk_scores[(x, y)] = risk_value
 
     def _add_risk_score(self, pos, score):
-        """辅助方法：累加风险分数"""
+        """辅助方法：累加风险分数 - 同时更新数组和字典"""
+        x, y = pos
+        # 检查坐标是否在扩展的风险数组范围内
+        if 0 <= x+1 < self.grid_width+2 and 0 <= y+1 < self.grid_height+2:
+            self.risk_array[y+1, x+1] += score
+            
+        # 更新字典（仅用于兼容现有代码）
         if pos in self.risk_scores:
             self.risk_scores[pos] += score
         else:
             self.risk_scores[pos] = score
 
-    def find_path(
-        self, start, target, board, init_path=None, min_path_length=2, method="A"
-    ):
+    def find_path(self, start, target, board, init_path=None, min_path_length=2, method="A" ):
         """
         统一寻路接口：支持A*和BFS
         参数：
@@ -159,53 +181,56 @@ class PathFinder(QObject):
 
         # 定义风险权重
         def risk_penalty(x, y):
-            return self.risk_scores.get((x, y), 0)
+            # 使用NumPy数组获取风险值，更快速
+            if 0 <= x < self.grid_width and 0 <= y < self.grid_height:
+                return self.risk_array[y+1, x+1]
+            return 0
 
         def heuristic(a, b):
             # 增加启发式函数权重，使路径更倾向于直线
             return 1.2 * (abs(a[0] - b[0]) + abs(a[1] - b[1]))
 
+        # 使用NumPy数组存储g_score，提高访问效率
+        g_score_array = np.full((self.grid_height, self.grid_width), np.inf, dtype=np.float32)
         open_set = []
         count = 0
         came_from = dict()
-        g_score = dict()
-        # 修改：不再使用visited集合来排除已访问节点，而是通过g_score判断
-        # visited = set()  # 记录已访问节点
-
+        # 记录每个节点的来源方向
+        node_directions = {}
+        
         # 初始化已有路径中每个点的累积代价
         total_cost = 0
         prev = None
-
-        # 记录每个节点的来源方向
-        node_directions = {}
 
         # 处理初始路径
         for idx, pt in enumerate(init_path):
             # 不再将初始路径点加入visited集合
             # visited.add(pt)
+            x, y = pt
             if idx == 0:
-                g_score[pt] = 0
+                g_score_array[y, x] = 0
             else:
-                penalty = risk_penalty(pt[0], pt[1])
+                penalty = risk_penalty(x, y)
 
                 # 计算方向变化并增加拐弯代价
                 if idx >= 2:
                     prev_prev = init_path[idx - 2]
                     prev = init_path[idx - 1]
-                    curr_dir = (pt[0] - prev[0], pt[1] - prev[1])
+                    curr_dir = (x - prev[0], y - prev[1])
                     prev_dir = (prev[0] - prev_prev[0], prev[1] - prev_prev[1])
                     if curr_dir != prev_dir:  # 方向改变，增加拐弯代价
                         penalty += 2  # 拐弯额外代价
                     # 记录方向
                     node_directions[pt] = curr_dir
 
-                g_score[pt] = total_cost + 1 + penalty
+                g_score_array[y, x] = total_cost + 1 + penalty
                 came_from[pt] = prev
-                total_cost = g_score[pt]
+                total_cost = g_score_array[y, x]
             prev = pt
 
         # 将续算起点加入开放列表，并初始化其g_score
-        g_score[new_start] = total_cost  # 修复：确保起点有g_score
+        x, y = new_start
+        g_score_array[y, x] = total_cost  # 修复：确保起点有g_score
         heapq.heappush(
             open_set, (total_cost + heuristic(new_start, target), count, new_start)
         )
@@ -235,8 +260,9 @@ class PathFinder(QObject):
             nodes_explored += 1
             f_val, _, current = heapq.heappop(open_set)
 
-            # 防止 KeyError: 如果节点没有初始化g_score则跳过
-            if current not in g_score:
+            # 获取当前节点的g_score
+            cx, cy = current
+            if g_score_array[cy, cx] == np.inf:
                 continue
 
             # 如果当前节点已处理过，跳过
@@ -284,38 +310,45 @@ class PathFinder(QObject):
                 continue
 
             x, y = current
-            # 随机打乱邻居顺序，增加路径多样性
-            moves = [(-1, 0), (1, 0), (0, -1), (0, 1)]
-            random.shuffle(moves)
-
-            for dx, dy in moves:
-                nx, ny = x + dx, y + dy
-                neighbor = (nx, ny)
-                if not (0 <= nx < self.grid_width and 0 <= ny < self.grid_height):
+            # 使用NumPy数组存储移动方向
+            moves = np.array([(-1, 0), (1, 0), (0, -1), (0, 1)])
+            # 随机打乱顺序
+            np.random.shuffle(moves)
+            
+            # 计算所有邻居位置
+            neighbors = np.array([(x, y)]) + moves
+            
+            # 批量检查边界条件
+            valid_mask = (neighbors[:, 0] >= 0) & (neighbors[:, 0] < self.grid_width) & \
+                         (neighbors[:, 1] >= 0) & (neighbors[:, 1] < self.grid_height)
+            
+            for i, valid in enumerate(valid_mask):
+                if not valid:
                     continue
-
+                    
+                nx, ny = neighbors[i]
+                neighbor = (nx, ny)
+                
                 cell = board.cells[ny][nx]
                 cell_type = cell.cell_type if cell else None
-                is_passable = (
-                    cell_type in ["empty", "score_boost", "own_head"]
-                ) or neighbor == target
+                is_passable = (cell_type in ["empty", "score_boost", "own_head"]) or neighbor == target
                 if not is_passable:
                     continue
 
                 penalty = risk_penalty(nx, ny)
 
                 # 计算拐弯代价
-                curr_dir = (dx, dy)
+                curr_dir = tuple(moves[i])
                 if current in node_directions:
                     prev_dir = node_directions[current]
                     if curr_dir != prev_dir:  # 方向改变，增加拐弯代价
                         penalty += 2  # 拐弯额外代价
 
-                tentative_g = g_score[current] + 1 + penalty
+                tentative_g = g_score_array[cy, cx] + 1 + penalty
 
-                # 只检查g_score，不再使用visited集合来判断是否访问过
-                if (neighbor not in g_score) or (tentative_g < g_score[neighbor]):
-                    g_score[neighbor] = tentative_g
+                # 使用NumPy数组检查g_score
+                if g_score_array[ny, nx] == np.inf or tentative_g < g_score_array[ny, nx]:
+                    g_score_array[ny, nx] = tentative_g
                     came_from[neighbor] = current
                     # 记录到达neighbor的方向
                     node_directions[neighbor] = curr_dir
@@ -377,17 +410,24 @@ class PathFinder(QObject):
                 else:
                     dir_vec = None
 
-                moves = [(0, -1), (0, 1), (-1, 0), (1, 0)]
+                # 使用NumPy数组存储移动方向
+                moves = np.array([(0, -1), (0, 1), (-1, 0), (1, 0)])
 
                 def risk_level(nx, ny):
-                    return self.risk_scores.get((x, y), 0)
+                    # 使用NumPy数组获取风险值
+                    if 0 <= nx < self.grid_width and 0 <= ny < self.grid_height:
+                        return self.risk_array[ny+1, nx+1]
+                    return 0
 
-                def move_priority(m):
-                    dx, dy = m
+                # 计算所有移动的优先级
+                move_priorities = []
+                for i, (dx, dy) in enumerate(moves):
                     same_dir = (dir_vec is not None) and ((dx, dy) == dir_vec)
-                    return (0 if same_dir else 1, risk_level(x + dx, y + dy))
-
-                moves.sort(key=move_priority)
+                    move_priorities.append((0 if same_dir else 1, risk_level(x + dx, y + dy), i))
+                
+                # 按优先级排序移动方向
+                move_priorities.sort()
+                moves = moves[[p[2] for p in move_priorities]]
 
                 if current_pos == target:
                     if len(path) >= min_path_length:
@@ -396,24 +436,36 @@ class PathFinder(QObject):
                     else:
                         continue
 
-                for dx, dy in moves:
-                    next_x, next_y = x + dx, y + dy
+                # 预计算所有邻居位置
+                next_positions = np.array([current_pos]) + moves
+                
+                # 批量检查边界条件
+                valid_mask = (next_positions[:, 0] >= 0) & (next_positions[:, 0] < self.grid_width) & \
+                             (next_positions[:, 1] >= 0) & (next_positions[:, 1] < self.grid_height)
+                
+                for i, valid in enumerate(valid_mask):
+                    if not valid:
+                        continue
+                        
+                    next_x, next_y = next_positions[i]
                     next_pos = (next_x, next_y)
-                    if 0 <= next_x < self.grid_width and 0 <= next_y < self.grid_height:
-                        cell = board.cells[next_y][next_x]
-                        cell_type = cell.cell_type if cell else None
-                        is_valid = (
-                            cell_type in ["empty", "score_boost", "own_head"]
-                        ) or next_pos == target
-                        if not is_valid:
-                            continue
+                    
+                    # 检查单元格类型
+                    cell = board.cells[next_y][next_x]
+                    cell_type = cell.cell_type if cell else None
+                    is_valid = (cell_type in ["empty", "score_boost", "own_head"]) or next_pos == target
+                    
+                    if not is_valid:
+                        continue
 
-                        if risk_level(next_x, next_y) > risk_threshold:
-                            continue
+                    # 检查风险等级
+                    if risk_level(next_x, next_y) > risk_threshold:
+                        continue
 
-                        if next_pos not in visited:
-                            visited.add(next_pos)
-                            queue.append((next_pos, path + [next_pos]))
+                    # 检查是否已访问
+                    if next_pos not in visited:
+                        visited.add(next_pos)
+                        queue.append((next_pos, path + [next_pos]))
 
             if found_path:
                 return found_path  # 找到较优路径即返回，避免放宽
@@ -437,20 +489,34 @@ class PathFinder(QObject):
 
         score_boosts = []
         if "score_boost" in board.special_cells:
-            for cell in board.special_cells["score_boost"]:
-                x, y = cell.col, cell.row
-                is_safe = True
-
-                # 检查周围3格范围
-                for dx in range(-3, 4):
-                    for dy in range(-3, 4):
-                        nx, ny = x + dx, y + dy
-                        # 如果超出边界，直接判定为不安全
-                        if not (0 <= nx < board.cols and 0 <= ny < board.rows):
-                            is_safe = False
-                            break
-                        # 检查格子类型
-                        cell_type = board.cells[ny][nx].cell_type
+            boost_cells = board.special_cells["score_boost"]
+            if boost_cells:
+                # 提取所有分数点坐标
+                boost_coords = np.array([(cell.col, cell.row) for cell in boost_cells])
+                
+                # 为每个分数点创建安全标志
+                safe_flags = np.ones(len(boost_coords), dtype=bool)
+                
+                # 创建周围3格的偏移量数组
+                offsets = np.array([(dx, dy) for dx in range(-3, 4) for dy in range(-3, 4)])
+                
+                # 对每个分数点检查安全性
+                for i, (x, y) in enumerate(boost_coords):
+                    # 计算周围所有格子的坐标
+                    surrounding = np.array([x, y]) + offsets
+                    
+                    # 检查边界条件
+                    valid = (surrounding[:, 0] >= 0) & (surrounding[:, 0] < board.cols) & \
+                            (surrounding[:, 1] >= 0) & (surrounding[:, 1] < board.rows)
+                    
+                    # 如果有任何格子超出边界，标记为不安全
+                    if not np.all(valid):
+                        safe_flags[i] = False
+                        continue
+                    
+                    # 检查有效格子的类型
+                    for sx, sy in surrounding[valid]:
+                        cell_type = board.cells[sy][sx].cell_type
                         if cell_type not in [
                             "empty",
                             "own_head",
@@ -458,17 +524,20 @@ class PathFinder(QObject):
                             "own_tail",
                             "score_boost",
                         ]:
-                            is_safe = False
+                            safe_flags[i] = False
                             break
-                    if not is_safe:
-                        break
-
-                if is_safe:
-                    score_boosts.append((x, y))
-                elif self.logger:
-                    self.logger.debug(
-                        f"[寻路] 分数点({x},{y})周围3格内存在危险或超出边界，跳过"
-                    )
+                
+                # 收集所有安全的分数点
+                safe_boosts = boost_coords[safe_flags]
+                score_boosts = [tuple(coord) for coord in safe_boosts]
+                
+                # 记录不安全的分数点
+                if self.logger:
+                    unsafe_boosts = boost_coords[~safe_flags]
+                    for x, y in unsafe_boosts:
+                        self.logger.debug(
+                            f"[寻路] 分数点({x},{y})周围3格内存在危险或超出边界，跳过"
+                        )
 
         # 没有分数点时直接返回None
         if not score_boosts:
@@ -537,13 +606,23 @@ class PathFinder(QObject):
                 return path
 
         # 2. 距离敌头最远的点
-        target = self.find_furthest_from_enemy_heads_bfs(board)
-        if target:
-            path = self.find_path(
-                self.start_pos, target, board, min_path_length=3, method="B"
+        safe_target = self.find_furthest_from_enemy_heads_bfs(board)
+        if safe_target:
+            pathA = self.find_path(
+                None,
+                safe_target,
+                board,
+                min_path_length=5,
+                method="A",
             )
-            if path:
-                return path
+            if pathA:
+                return pathA
+            else:
+                pathB = self.find_path(
+                    self.start_pos, safe_target, board, min_path_length=3, method="B"
+                )
+                if pathB:
+                    return pathB
 
         # 3. 全失败，放弃
         return None
@@ -641,23 +720,39 @@ class PathFinder(QObject):
         返回：(左上角x, 左上角y, 宽度w, 高度h)
         """
         rows, cols = board.rows, board.cols
-        heights = [[0] * cols for _ in range(rows)]
+        
+        # 使用NumPy数组替代嵌套列表，提高性能
+        heights = np.zeros((rows, cols), dtype=np.int32)
         max_area = 0
         max_rect = (0, 0, 0, 0)
 
-        # 计算每行的高度图
+        # 创建空白格子的掩码
+        empty_mask = np.zeros((rows, cols), dtype=bool)
+        
+        # 一次性检查所有单元格
         for y in range(rows):
             for x in range(cols):
                 cell = board.cells[y][x]
                 if cell and cell.cell_type == "empty":
-                    heights[y][x] = 1 + (heights[y - 1][x] if y > 0 else 0)
-                else:
-                    heights[y][x] = 0
+                    empty_mask[y, x] = True
+        
+        # 计算高度图 - 使用向量化操作
+        for y in range(rows):
+            if y > 0:
+                # 当前行的高度 = 如果是空白格，则为上一行高度+1，否则为0
+                heights[y] = np.where(empty_mask[y], heights[y-1] + 1, 0)
+            else:
+                # 第一行直接使用空白掩码
+                heights[0] = empty_mask[0].astype(np.int32)
 
         # 对每一行做直方图最大矩形
         for y in range(rows):
+            # 使用NumPy数组存储直方图，避免列表拼接操作
+            hist = np.zeros(cols + 1, dtype=np.int32)
+            hist[:cols] = heights[y]
+            # hist[cols] 默认为0，作为哨兵
+            
             stack = []
-            hist = heights[y] + [0]  # 哨兵简化代码
             for i in range(cols + 1):
                 while stack and hist[i] < hist[stack[-1]]:
                     top_idx = stack.pop()
@@ -679,43 +774,72 @@ class PathFinder(QObject):
         返回：(x,y)
         """
         rows, cols = board.rows, board.cols
-        dist_map = [[-1 for _ in range(cols)] for _ in range(rows)]
+        # 使用NumPy数组替代嵌套列表
+        dist_map = np.full((rows, cols), -1, dtype=np.int32)
         from collections import deque
 
         queue = deque()
         # 初始化：敌头集合
         for key in ["enemy_head", "enemy2_head", "enemy3_head"]:
             heads = board.special_cells.get(key, [])
-            for cell in heads:
-                x, y = cell.col, cell.row
-                dist_map[y][x] = 0
+            if not heads:
+                continue
+                
+            # 批量处理敌人头部位置
+            head_coords = [(cell.col, cell.row) for cell in heads]
+            for x, y in head_coords:
+                dist_map[y, x] = 0
                 queue.append((x, y))
 
+        # 预先创建方向数组
+        directions = np.array([(-1, 0), (1, 0), (0, -1), (0, 1)], dtype=np.int32)
+        
         # BFS扩散距离
         while queue:
             x, y = queue.popleft()
-            for dx, dy in [(-1, 0), (1, 0), (0, -1), (0, 1)]:
-                nx, ny = x + dx, y + dy
-                if 0 <= nx < cols and 0 <= ny < rows:
-                    cell = board.cells[ny][nx]
-                    if not cell or cell.cell_type != "empty":
-                        continue
-                    if dist_map[ny][nx] == -1:
-                        dist_map[ny][nx] = dist_map[y][x] + 1
-                        queue.append((nx, ny))
+            # 计算所有邻居位置
+            neighbors = np.array([(x, y)]) + directions
+            
+            # 批量检查边界条件
+            valid_mask = (neighbors[:, 0] >= 0) & (neighbors[:, 0] < cols) & \
+                         (neighbors[:, 1] >= 0) & (neighbors[:, 1] < rows)
+            
+            for i, valid in enumerate(valid_mask):
+                if not valid:
+                    continue
+                    
+                nx, ny = neighbors[i]
+                cell = board.cells[ny][nx]
+                if not cell or cell.cell_type != "empty":
+                    continue
+                if dist_map[ny, nx] == -1:
+                    dist_map[ny, nx] = dist_map[y, x] + 1
+                    queue.append((nx, ny))
 
-        # 找距离最大的空格
-        max_dist = -1
-        result = None
+        # 创建空白格子掩码
+        empty_mask = np.zeros((rows, cols), dtype=bool)
         for y in range(rows):
             for x in range(cols):
                 cell = board.cells[y][x]
-                if not cell or cell.cell_type != "empty":
-                    continue
-                if dist_map[y][x] > max_dist:
-                    max_dist = dist_map[y][x]
-                    result = (x, y)
-        return result
+                if cell and cell.cell_type == "empty":
+                    empty_mask[y, x] = True
+        
+        # 将非空白格子的距离设为-1
+        dist_map = np.where(empty_mask, dist_map, -1)
+        
+        # 找到最大距离的位置
+        max_dist = np.max(dist_map)
+        if max_dist == -1:
+            return None
+            
+        # 找到所有最大距离的位置
+        y_indices, x_indices = np.where(dist_map == max_dist)
+        if len(y_indices) == 0:
+            return None
+            
+        # 如果有多个最远点，随机选择一个
+        idx = 0 if len(y_indices) == 1 else np.random.randint(0, len(y_indices))
+        return (int(x_indices[idx]), int(y_indices[idx]))
 
     def find_path_in_order(self, board):
         """

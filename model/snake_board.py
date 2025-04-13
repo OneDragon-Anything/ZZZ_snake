@@ -39,6 +39,7 @@ class Board:
         self.head_position = None  # 蛇头精准坐标 (x,y)
         self.eye_position = None  # 蛇眼精准坐标 (x,y)
         self.head_direction = None  # 蛇头运动方向 ('up','down','left','right')
+        self.snake_player = None  # 添加snake_player引用
 
         if image is not None:
             self.set_hsv_image(image, image_format)

@@ -1,5 +1,5 @@
 import cv2
-
+import numpy as np
 
 class ImageCell:
     """
@@ -63,13 +63,11 @@ class ImageCell:
         x1, y1, x2, y2 = self.bounds
         cropped = image[y1 + border : y2 - border, x1 + border : x2 - border]
         h_values = cropped[:, :, 0].flatten()
-
-        color_dict = {}
-        for h in h_values:
-            color_dict[h] = color_dict.get(h, 0) + 1
-
+        
+        # 使用numpy的unique和bincount进行快速计数
+        unique_values, counts = np.unique(h_values, return_counts=True)
+        self.color_dict = dict(zip(unique_values, counts))
         self.h_values = h_values
-        self.color_dict = color_dict
         return self.color_dict
 
 

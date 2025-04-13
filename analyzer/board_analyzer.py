@@ -39,7 +39,10 @@ class BoardAnalyzer:
             "enemy2_body_tail": [134, 134, 255],
             "enemy3_head": [17, 255, 255],
             "enemy3_body_tail": [30, 255, 255],
-            "grid_light": [89, 80, 236],
+            "enemy4_head": [0, 255, 255],
+            "enemy4_body": [176, 242, 255],
+            "enemy4_body_tail": [157, 152, 255],
+            "grid_light": [88, 80, 236],
             "grid_dark": [97, 251, 203],
             "game_over": [109, 195, 88],
         }
@@ -53,6 +56,9 @@ class BoardAnalyzer:
         self.enemy2_tail = self.grid_colors_hsv["enemy2_body_tail"][0]
         self.enemy3_head = self.grid_colors_hsv["enemy3_head"][0]
         self.enemy3_tail = self.grid_colors_hsv["enemy3_body_tail"][0]
+        self.enemy4_head = self.grid_colors_hsv["enemy4_head"][0]
+        self.enemy4_body = self.grid_colors_hsv["enemy4_body"][0]
+        self.enemy4_body_tail = self.grid_colors_hsv["enemy4_body_tail"][0]
         self.grid_light = self.grid_colors_hsv["grid_light"][0]
         self.grid_dark = self.grid_colors_hsv["grid_dark"][0]
         self.game_over = self.grid_colors_hsv["game_over"][0]
@@ -128,47 +134,49 @@ class BoardAnalyzer:
         if not self.board:
             return
 
-        # 初始化所有格子为空白格
-        for row in self.board.cells:
-            for cell in row:
-                cell.cell_type = "empty"
+        # 使用numpy向量化操作初始化所有格子
+        cells = np.array(self.board.cells)
+        for cell in cells.flat:
+            h, s, _ = cell.center_color
+            h_in_range = self.grid_light <= h <= self.grid_dark
+            s_in_range = (
+                self.grid_colors_hsv["grid_light"][1]
+                <= s
+                <= self.grid_colors_hsv["grid_dark"][1]
+            )
+            cell.cell_type = "empty" if h_in_range and s_in_range else "unknown"
 
         self.special_cells = {}  # 重置特殊格子字典
 
         # 继承上一帧的蛇身信息（蛇头变为蛇身）
-        previous = (
-            self.board.special_cells if hasattr(self.board, "special_cells") else {}
-        )
-        inherited_body_cells = []
-
-        # 处理所有蛇头类型，转换为蛇身
-        for head_type in ["own_head", "enemy_head", "own_body", "enemy_body"]:
-            for cell in previous.get(head_type, []):
-                cell.cell_type = (
-                    "own_body"
-                    if head_type in ["own_head", "own_body"]
-                    else "enemy_body"
-                )
-                self.add_to_special_cells(cell.cell_type, cell)
-                inherited_body_cells.append(cell)
+        previous = self.board.special_cells if hasattr(self.board, "special_cells") else {}
+        
+        # 批量处理蛇头类型转换为蛇身
+        head_types = {"own_head": "own_body", "enemy_head": "enemy_body", 
+                     "own_body": "own_body", "enemy_body": "enemy_body"}
+        for head_type, body_type in head_types.items():
+            if head_type in previous:
+                for cell in previous[head_type]:
+                    cell.cell_type = body_type
+                    self.add_to_special_cells(body_type, cell)
 
         # 模板匹配识别特殊元素
         self.analyze_by_templates()
 
-        # 全盘扫描识别特殊格子
-        for row in self.board.cells:
-            for cell in row:
-                if cell.cell_type == "empty":  # 只处理未被继承的格子
-                    cell_type = self.determine_cell_type(cell.center_color)
-                    cell.cell_type = cell_type
-                    if cell_type != "empty":
-                        self.add_to_special_cells(cell_type, cell)
-
-        # 深度分析未知格子
-        unknow_cells = self.special_cells.get("unknow", [])
-        if unknow_cells:
-            for cell in unknow_cells[:]:  # 使用副本遍历
-                self.deep_analysis_cell(cell)
+        # 向量化处理空白和未知格子的类型判断
+        cells_to_analyze = [cell for cell in cells.flat if cell.cell_type in ["empty", "unknown"]]
+        if cells_to_analyze:
+            # 批量获取中心颜色
+            center_colors = np.array([cell.center_color for cell in cells_to_analyze])
+            # 批量判断类型
+            cell_types = np.array([self.determine_cell_type(color) for color in center_colors])
+            # 批量更新类型和特殊格子
+            for cell, cell_type in zip(cells_to_analyze, cell_types):
+                if cell_type == "unknown":
+                    cell_type = self.deep_analysis_cell(cell)
+                cell.cell_type = cell_type
+                if cell_type != "empty":
+                    self.add_to_special_cells(cell_type, cell)
 
     def deep_analysis_cell(self, cell):
         """
@@ -199,8 +207,8 @@ class BoardAnalyzer:
             new_type = self.determine_cell_type((h_value, 170, 255))
             # print(f"分析颜色H={h_value}, 数量={count}, 判定类型={new_type}")
 
-            # 如果找到非empty和非unknow的类型
-            if new_type not in ["empty", "unknow"]:
+            # 如果找到非empty和非unknown的类型
+            if new_type not in ["empty", "unknown"]:
                 # 从原类型列表中移除该格子
                 self.remove_from_special_cells(cell.cell_type, cell)
                 # 更新格子的中心颜色和类型
@@ -211,7 +219,7 @@ class BoardAnalyzer:
                 # print(f"格子({cell.row+1}, {cell.col+1})更新为: {new_type}")
                 return new_type
 
-        # 如果所有颜色都是empty或unknow，保持原状
+        # 如果所有颜色都是empty或unknown，保持原状
         # print(f"格子({cell.row+1}, {cell.col+1})保持原状: {cell.cell_type}")
         return cell.cell_type
 
@@ -286,10 +294,13 @@ class BoardAnalyzer:
                 return "enemy_head"
             elif h == self.enemy3_head:
                 return "enemy_head"
+            elif h == self.enemy4_head:
+                return "enemy_head"
             elif (
                 (self.enemy2_tail <= h <= self.enemy2_head)
                 or (self.enemy_tail >= h >= self.enemy_head)
                 or (self.enemy3_head <= h <= self.enemy3_tail)
+                or (self.enemy4_body_tail <= h <= self.enemy4_body)
             ):
                 return "enemy_body"
         # 检查是否在空格子的HSV范围内
@@ -303,7 +314,7 @@ class BoardAnalyzer:
         if h_in_range and s_in_range:
             return "empty"
 
-        return "unknow"
+        return "unknown"
 
     def add_to_special_cells(self, cell_type, cell, special_cells=None):
         """
@@ -312,28 +323,26 @@ class BoardAnalyzer:
         :param cell: 要添加的单元格对象
         :param special_cells: 可选，指定要操作的特殊格字典，None则使用self.special_cells
         """
-        if cell is None:
-            return  # 防止None被添加进来
+        if cell is None or not isinstance(cell, ImageCell):
+            return
 
-        # 可选！严格类型判断
-        if not isinstance(cell, ImageCell):
-            return  # 不是合法棋盘格，跳过
-
-        target_cells = (
-            special_cells if special_cells is not None else self.special_cells
-        )
-
+        target_cells = special_cells if special_cells is not None else self.special_cells
+        
+        # 使用集合存储坐标，提高查找效率
         if cell_type not in target_cells:
             target_cells[cell_type] = []
+            target_cells[f"{cell_type}_coords"] = set()
 
-        # 先移除坐标相同的已有cell
-        target_cells[cell_type] = [
-            c
-            for c in target_cells[cell_type]
-            if not (c.row == cell.row and c.col == cell.col)
-        ]
-
-        # 添加新cell（坐标唯一）
+        coords = (cell.row, cell.col)
+        coords_set = target_cells[f"{cell_type}_coords"]
+        
+        # 如果坐标已存在，先移除旧的cell
+        if coords in coords_set:
+            target_cells[cell_type] = [c for c in target_cells[cell_type] if (c.row, c.col) != coords]
+        else:
+            coords_set.add(coords)
+            
+        # 添加新cell
         target_cells[cell_type].append(cell)
 
     def remove_from_special_cells(self, cell_type, cell, special_cells=None):
@@ -582,64 +591,57 @@ class BoardAnalyzer:
         返回:
             更新后的special_cells字典
         """
-        # 如果已有模板则直接使用，否则获取新模板
+        if not self.board:
+            return self.special_cells
+
+        # 使用缓存的模板
         if not hasattr(self, "_cached_templates"):
             self.logger and self.logger.debug("获取新模板")
             self._cached_templates = self.template_manager.get_all_templates()
+            # 预处理模板分类
+            self._template_categories = {}
+            for template in self._cached_templates:
+                if template.frame_id.lower() == "snake" and "snake" not in template.template_id:
+                    category = "score_boost" if template.template_id.lower() in ["diamond", "yellow_crystal"] else template.template_id.lower()
+                    if category not in self._template_categories:
+                        self._template_categories[category] = []
+                    self._template_categories[category].append(template)
 
-        # 获取所有snake模板
-        snake_templates = [
-            template
-            for template in self._cached_templates
-            if template.frame_id.lower() == "snake"
-        ]
+        # 批量处理所有模板匹配
+        all_matches = {}
+        for category, templates in self._template_categories.items():
+            category_matches = []
+            for template in templates:
+                matches = self.template_manager.find_objects_by_features(
+                    template, hsv_image=self.board.hsv_image
+                )
+                if matches:
+                    category_matches.extend(matches)
+            if category_matches:
+                all_matches[category] = category_matches
 
-        if not snake_templates or not self.board:
-            return self.special_cells
+        # 批量更新格子类型
+        for cell_type, matches in all_matches.items():
+            is_special = cell_type in ["mine", "super_star"]
+            cells_to_update = []
 
-        # 逐个模板匹配
-        for template in snake_templates:
-            # 如果模板ID包含"蛇"则跳过
-            if "snake" in template.template_id:
-                continue
-
-            if self.logger:
-                has_image = hasattr(template, "image_path") and template.image_path
-
-            matches = self.template_manager.find_objects_by_features(
-                template, hsv_image=self.board.hsv_image
-            )
-
-            if not matches:
-                continue
-            # 根据模板ID确定格子类型
-            if template.template_id.lower() in ["diamond", "yellow_crystal"]:
-                cell_type = "score_boost"
-            else:
-                cell_type = template.template_id.lower()  # 默认类型
-            # 将匹配结果映射到棋盘格子
             for x, y, angle, score in matches:
-
-                if template.template_id.lower() in ["mine", "super_star"]:
-                    # 直接获取四个方向的格子
+                if is_special:
                     positions = [
-                        (x + 5, y + 5),  # 右
-                        (x - 5, y - 5),  # 左
-                        (x - 5, y + 5),  # 下
-                        (x + 5, y - 5),  # 上
+                        (x + 5, y + 5), (x - 5, y - 5),
+                        (x - 5, y + 5), (x + 5, y - 5)
                     ]
-                    for px, py in positions:
-                        cell = self.board.get_cell_by_position(px, py)
-                        if cell:
-                            self.remove_from_special_cells(cell.cell_type, cell)
-                            cell.cell_type = cell_type
-                            self.add_to_special_cells(cell_type, cell)
+                    cells = [self.board.get_cell_by_position(px, py) for px, py in positions]
+                    cells_to_update.extend([c for c in cells if c])
                 else:
-                    # 普通处理方式
                     cell = self.board.get_cell_by_position(x, y)
                     if cell:
-                        self.remove_from_special_cells(cell.cell_type, cell)
-                        cell.cell_type = cell_type
-                        self.add_to_special_cells(cell_type, cell)
+                        cells_to_update.append(cell)
+
+            # 批量更新格子
+            for cell in cells_to_update:
+                self.remove_from_special_cells(cell.cell_type, cell)
+                cell.cell_type = cell_type
+                self.add_to_special_cells(cell_type, cell)
 
         return self.special_cells

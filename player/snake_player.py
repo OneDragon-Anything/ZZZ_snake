@@ -40,7 +40,7 @@ class SnakePlayer(QObject):
         "empty",
         "score_boost",
         "own_head",
-        "unknow",
+        "unknown",
         "own_tail",
         "own_body",
     }
@@ -58,6 +58,11 @@ class SnakePlayer(QObject):
         self.current_direction = None
         self.current_path = []
         self.head_next_pos = None
+        
+        # 蛇头位置相关
+        self.observed_head_pos = None  # 实际观察到的蛇头位置
+        self.predicted_head_pos = None  # 预测的蛇头位置
+        self.predicted_body_positions = []  # 预测的蛇身位置列表(最多保持5格)
 
         # 画面捕获相关
         self.sct = mss.mss()
@@ -84,6 +89,10 @@ class SnakePlayer(QObject):
 
         # 调试相关
         self.reason = None
+        
+        # 路径方向缓存
+        self.cached_directions = []
+        self.last_execute_time = 0
 
     def __del__(self):
         """析构时清理资源"""
@@ -186,6 +195,9 @@ class SnakePlayer(QObject):
             return None, None, []
 
         self._update_frame_time()
+        
+        # 每帧检查是否需要执行缓存方向
+        self._execute_cached_directions(hwnd)
 
         try:
             game_state, board = self._analyze_frame(screen_cv)
@@ -235,6 +247,8 @@ class SnakePlayer(QObject):
             self.board = self.board_analyzer.analyze_board(
                 self.board, last_key_direction=self.current_direction
             )
+            # 设置Board对象的snake_player引用
+            self.board.snake_player = self
 
             game_state = self._determine_game_state()
             self.predict_or_update_head(self.board)
@@ -336,8 +350,8 @@ class SnakePlayer(QObject):
         x, y = pos
         cell_type = board.cells[y][x].cell_type
 
-        # 检查格子类型
-        if cell_type not in self.SAFE_CELL_TYPES:
+        # 检查格子类型，将预测蛇身也视为障碍物
+        if cell_type not in self.SAFE_CELL_TYPES and cell_type != "predicted_body":
             self.log_debug(
                 f"[路径评估] 清空路径：遇到障碍物，位置({x},{y})，类型={cell_type}"
             )
@@ -358,20 +372,25 @@ class SnakePlayer(QObject):
         if not self._prepare_snake_control(hwnd):
             return
 
-        real_head = self._get_snake_head()
-        if not real_head:
-            return
+        # 使用预测坐标代替实际观察坐标
+        if not self.predicted_head_pos:
+            real_head = self._get_snake_head()
+            if not real_head:
+                return
+            head_pos = real_head
+        else:
+            head_pos = self.predicted_head_pos
 
-        target = self._find_next_target(real_head)
+        target = self._find_next_target(head_pos)
         if not target:
             return
 
-        direction = self._calculate_direction(real_head, target)
+        direction = self._calculate_direction(head_pos, target)
         if direction:
             self.snake_move(
                 hwnd,
                 direction,
-                reason=f"路径跟随：从({real_head[0]},{real_head[1]})到({target[0]},{target[1]})",
+                reason=f"路径跟随：从({head_pos[0]},{head_pos[1]})到({target[0]},{target[1]})",
             )
 
     def _prepare_snake_control(self, hwnd) -> bool:
@@ -383,6 +402,9 @@ class SnakePlayer(QObject):
             return False
 
         if len(self.current_path) < 2:
+            return False
+
+        if len(self.cached_directions) > 0:
             return False
 
         return True
@@ -471,6 +493,42 @@ class SnakePlayer(QObject):
         self.current_direction = direction
         self.last_direction_time = now
         self._update_last_head_position()
+        
+        
+    def _cache_future_directions(self):
+        """缓存未来5步的方向"""
+        if not self.current_path or len(self.current_path) < 2:
+            self.cached_directions = []
+            return
+            
+        self.cached_directions = []
+        for i in range(min(5, len(self.current_path)-1)):
+            start = self.current_path[i]
+            end = self.current_path[i+1]
+            dx = end[0] - start[0]
+            dy = end[1] - start[1]
+            
+            if dx == 1:
+                self.cached_directions.append("right")
+            elif dx == -1:
+                self.cached_directions.append("left")
+            elif dy == 1:
+                self.cached_directions.append("down")
+            elif dy == -1:
+                self.cached_directions.append("up")
+                
+    def _execute_cached_directions(self, hwnd):
+        """执行缓存的移动方向"""
+        now = time.time()
+        if now - self.last_execute_time < self.MOVE_INTERVAL:
+            return
+            
+        if not self.cached_directions:
+            return
+            
+        direction = self.cached_directions.pop(0)
+        self._execute_move(hwnd, direction, "执行缓存方向", now)
+        self.last_execute_time = now
 
     def _update_last_head_position(self):
         """更新最后的蛇头位置"""
@@ -482,16 +540,98 @@ class SnakePlayer(QObject):
 
     def predict_or_update_head(self, board: Board):
         """预测或更新蛇头位置"""
+        current_time = time.time()
+        
+        # 如果观察到蛇头，更新观察位置
         if board.special_cells.get("own_head"):
-            return
+            head_cell = board.special_cells["own_head"][0]
+            head_pos = (head_cell.col, head_cell.row)
+            self.observed_head_pos = head_pos
+            
+            # 如果预测位置存在，检查与观察位置的距离
+            if self.predicted_head_pos:
+                dx = abs(self.predicted_head_pos[0] - head_pos[0])
+                dy = abs(self.predicted_head_pos[1] - head_pos[1])
+                manhattan_distance = dx + dy
+                
+                # 当曼哈顿距离超过2格时，立即同步位置
+                if manhattan_distance > 2:
+                    self.predicted_head_pos = head_pos
+                    self.last_time_control_snake_head = head_pos
+                    # 清空预测蛇身，重新开始记录
+                    self.predicted_body_positions = []
+                # 每3秒也进行一次同步
+                elif current_time - self.last_direction_time >= 3:
+                    self.predicted_head_pos = head_pos
+                    self.last_time_control_snake_head = head_pos
+                    # 清空预测蛇身，重新开始记录
+                    self.predicted_body_positions = []
+            
+            # 如果观察到的蛇头位置与上一次不同，将其添加到预测蛇身列表中
+            if self.predicted_head_pos and self.predicted_head_pos != head_pos:
+                # 避免重复添加相同位置
+                if not self.predicted_body_positions or self.predicted_body_positions[0] != self.predicted_head_pos:
+                    self.predicted_body_positions.insert(0, self.predicted_head_pos)
+                    # 限制预测蛇身长度，最多保持5格
+                    if len(self.predicted_body_positions) > 5:
+                        self.predicted_body_positions.pop()
+        
+        # # 无论是否观察到蛇头，都进行预测
+        # if self._can_predict_head():
+        #     predicted_pos = self._calculate_predicted_position()
+        #     if predicted_pos:
+        #         self.predicted_head_pos = predicted_pos
+        #         # 使用预测位置更新棋盘
+        #         self._update_board_with_predicted_head(board, predicted_pos)
+        #         # 更新预测蛇身到棋盘
+        #         self._update_board_with_predicted_body(board)
+                
+        # # 预测后检测是否需要缓存未来5步方向
+        # if self._should_cache_future_moves(board):
+        #     self._cache_future_directions()
 
-        if not self._can_predict_head():
-            return
+        # # 只在缓存方向不为空时执行
+        # if len(self.cached_directions) > 0:
+        #     self._execute_cached_directions(self.last_hwnd)
 
-        predicted_pos = self._calculate_predicted_position()
-        if predicted_pos:
-            self._update_board_with_predicted_head(board, predicted_pos)
-
+    def _should_cache_future_moves(self, board: Board) -> bool:
+        """检测是否需要缓存未来5步方向"""
+        if not self.current_path or len(self.current_path) < 6:
+            return False
+            
+        # 检查转弯次数是否超过3次
+        turn_count = 0
+        last_direction = None
+        for i in range(5):
+            start = self.current_path[i]
+            end = self.current_path[i+1]
+            dx = end[0] - start[0]
+            dy = end[1] - start[1]
+            
+            current_direction = None
+            if dx == 1:
+                current_direction = "right"
+            elif dx == -1:
+                current_direction = "left"
+            elif dy == 1:
+                current_direction = "down"
+            elif dy == -1:
+                current_direction = "up"
+                
+            if last_direction and current_direction != last_direction:
+                turn_count += 1
+                if turn_count > 3:
+                    return True
+            last_direction = current_direction
+            
+        # 检查下一格是否是分数格
+        next_pos = self.current_path[1]
+        cell = board.cells[next_pos[1]][next_pos[0]]
+        if cell.cell_type == "score_boost":
+            return True
+            
+        return False
+        
     def _can_predict_head(self) -> bool:
         """检查是否可以预测蛇头"""
         return bool(
@@ -536,6 +676,27 @@ class SnakePlayer(QObject):
             if not (c.row == cell.row and c.col == cell.col)
         ]
         board.special_cells["own_head"].append(cell)
+        
+    def _update_board_with_predicted_body(self, board: Board):
+        """使用预测蛇身位置更新棋盘"""
+        # 确保预测蛇身类型存在于special_cells中
+        if "predicted_body" not in board.special_cells:
+            board.special_cells["predicted_body"] = []
+        
+        # 清空之前的预测蛇身
+        board.special_cells["predicted_body"] = []
+        
+        # 添加新的预测蛇身
+        for pos in self.predicted_body_positions:
+            x, y = pos
+            # 确保坐标在棋盘范围内
+            if 0 <= x < self.BOARD_WIDTH and 0 <= y < self.BOARD_HEIGHT:
+                cell = board.cells[y][x]
+                # 只有当格子类型为空或者是蛇尾时才标记为预测蛇身
+                # 这样可以确保蛇尾移动时能覆盖预测蛇身
+                if cell.cell_type == "empty" or cell.cell_type == "own_tail":
+                    cell.cell_type = "predicted_body"
+                    board.special_cells["predicted_body"].append(cell)
 
     def find_new_path(self, emergency: bool = False):
         """寻找新路径"""
@@ -621,3 +782,21 @@ class SnakePlayer(QObject):
         if available_directions:
             direction = available_directions[0]  # 选择第一个可用方向
             self.snake_move(hwnd, direction, reason="紧急避险")
+
+    def predict_snake_position(self) -> "tuple|None":
+        """预测小蛇当前坐标
+        基于最后控制方向和最后控制时间计算预测位置
+        
+        Returns:
+            tuple|None: 返回预测的(x,y)坐标，如果无法预测则返回None
+        """
+        if not self._can_predict_head():
+            return None
+            
+        predicted_pos = self._calculate_predicted_position()
+        if predicted_pos:
+            x, y = predicted_pos
+            if 0 <= x < self.BOARD_WIDTH and 0 <= y < self.BOARD_HEIGHT:
+                return predicted_pos
+        return None
+        

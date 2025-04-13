@@ -272,9 +272,9 @@ class SnakeGameCard(QFrame):
         path_text = ""
         if path:
             if len(path) >= 2:
-                path_text = f"{path[0]}->{path[1]}"
+                path_text = f"({int(path[0][0])},{int(path[0][1])})->({int(path[1][0])},{int(path[1][1])})"
             elif len(path) == 1:
-                path_text = f"{path[0]}"
+                path_text = f"({int(path[0][0])},{int(path[0][1])})"
             else:
                 path_text = "无"
         else:

@@ -95,10 +95,58 @@ class MapDrawer:
             "enemy_body": (128, 0, 0),  # 深红色
             "enemy_tail": (128, 128, 0),  # 橄榄色
             "mine": (255, 0, 255),  # 紫色
-            "unknow": (0, 0, 0),  # 黑色
+            "unknown": (0, 0, 0),  # 黑色
+            "predicted_head": (0, 128, 255),  # 橙色(预测蛇头)
+            "predicted_body": (0, 255, 255),  # 黄色(预测蛇身，高对比度)
             # 默认颜色
             "default": (128, 128, 128),  # 灰色
         }
+
+        # 绘制预测的蛇头位置
+        if hasattr(self.board, 'snake_player') and self.board.snake_player and self.board.snake_player.predicted_head_pos:
+            x, y = self.board.snake_player.predicted_head_pos
+            center = self.board.get_cell_center(y, x)
+            if center:
+                center_x, center_y = center
+                # 使用橙色绘制预测蛇头，改为十字标记
+                size = 10
+                cv2.line(
+                    screen_cv,
+                    (center_x - size, center_y - size),
+                    (center_x + size, center_y + size),
+                    (0, 128, 255),  # 橙色
+                    3,
+                )
+                cv2.line(
+                    screen_cv,
+                    (center_x - size, center_y + size),
+                    (center_x + size, center_y - size),
+                    (0, 128, 255),  # 橙色
+                    3,
+                )
+        
+        # 绘制预测的蛇身位置
+        if hasattr(self.board, 'special_cells') and 'predicted_body' in self.board.special_cells:
+            for cell in self.board.special_cells['predicted_body']:
+                center = self.board.get_cell_center(cell.row, cell.col)
+                if center:
+                    center_x, center_y = center
+                    # 使用黄色绘制预测蛇身，使用十字标记
+                    size = 10
+                    cv2.line(
+                        screen_cv,
+                        (center_x - size, center_y - size),
+                        (center_x + size, center_y + size),
+                        (0, 255, 255),  # 黄色
+                        3,
+                    )
+                    cv2.line(
+                        screen_cv,
+                        (center_x - size, center_y + size),
+                        (center_x + size, center_y - size),
+                        (0, 255, 255),  # 黄色
+                        3,
+                    )
 
         for y, row in enumerate(self.board.cells):
             for x, cell in enumerate(row):
