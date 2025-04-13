@@ -1,52 +1,94 @@
-# SvsS - AI贪吃蛇对战框架
+# SvsS (Snake vs Snake) 贪吃蛇游戏AI
 
-## 项目概述
-基于PyQt5开发的AI贪吃蛇对战框架，支持实时可视化、智能体控制和多策略对战。包含完整的游戏逻辑分析、路径规划算法和可视化模块。
+这是一个基于Python的贪吃蛇游戏AI项目，使用PyQt5构建界面，OpenCV进行图像处理，实现了自动识别游戏画面并进行智能操控的功能。
 
 ## 项目结构
+
 ```
 SvsS/
-├── analyzer/        # 游戏逻辑分析模块
-│   └── board_analyzer.py   # 棋盘状态分析
-│   └── path_finder.py      # A*路径规划算法
-├── controller/      # 游戏控制模块
-│   └── snake_controller.py # 键盘事件模拟
-├── view/            # 可视化界面
-│   └── card/        # 游戏卡片组件
-│       └── snake_card.py   # 主游戏面板UI
-├── player/          # 智能体模块
-│   └── snake_player.py     # 自动控制逻辑
-├── templates/       # 蛇类行为模板
-│   └── snake/       # 不同AI策略
-│       └── eye/      # 视觉识别策略
-│       └── mine/     # 地雷躲避策略
-├── log/             # 日志系统
-├── model/           # 数据模型
-└── main.py          # 程序入口
+├── analyzer/                 # 分析器模块
+│   ├── board_analyzer.py    # 棋盘分析器
+│   └── path_finder.py       # 路径寻找器
+├── app/                     # 应用配置
+│   └── config/             # 配置文件目录
+├── controller/             # 控制器模块
+│   └── snake_controller.py # 蛇控制器
+├── drawer/                 # 绘制器模块
+│   └── map_drawer.py      # 地图绘制器
+├── log/                    # 日志模块
+│   ├── debug_helper.py    # 调试助手
+│   └── log.py            # 日志记录器
+├── model/                  # 模型模块
+│   ├── image_cell.py     # 图像单元类
+│   ├── snake_board.py    # 蛇棋盘类
+│   └── template/         # 模板相关类
+├── player/                # 玩家模块
+│   └── snake_player.py   # 蛇玩家类
+├── templates/             # 模板资源
+│   ├── default_frame/    # 默认框架模板
+│   └── snake/            # 蛇相关模板
+├── view/                  # 视图模块
+│   └── card/             # 卡片组件
+├── main.py               # 主程序入口
+├── mainwindow.py         # 主窗口
+└── requirements.txt      # 项目依赖
 ```
 
 ## 主要功能
-- 实时游戏画面捕获与分析
-- 多策略AI智能体控制
-- 可视化调试面板
-- 性能监控仪表盘
-- 历史截图批量保存
+
+1. **棋盘分析**
+   - 实时识别游戏画面
+   - 分析蛇的位置和方向
+   - 识别游戏中的各种元素（食物、障碍物等）
+
+2. **智能寻路**
+   - 使用路径寻找算法
+   - 自动规划最优路径
+   - 避开障碍物
+
+3. **自动控制**
+   - 自动操控蛇的移动
+   - 实时响应游戏状态
+   - 智能决策下一步行动
+
+4. **可视化界面**
+   - 实时显示游戏画面
+   - 分析结果可视化
+   - 性能指标监控
+
+5. **调试功能**
+   - 详细的日志记录
+   - 调试信息输出
+   - 截图保存功能
+
+## 技术栈
+
+- Python 3.x
+- PyQt5：GUI框架
+- OpenCV：图像处理
+- NumPy：数据处理
+- QFluentWidgets：现代化UI组件
 
 ## 使用说明
-```bash
-# 安装依赖
-pip install -r requirements.txt
 
-# 运行程序
+1. 安装依赖：
+```bash
+pip install -r requirements.txt
+```
+
+2. 运行程序：
+```bash
 python main.py
 ```
 
-## 配置说明
-1. 在`templates/snake/`目录创建AI策略模板
-2. 通过`snake_card.py`界面启用智能体控制
-3. 使用`DebugHelper`保存分析过程截图
+3. 程序会以管理员权限运行，用于实现游戏画面捕获功能。
 
-## 开发建议
-- 继承`SnakePlayer`类实现自定义AI
-- 通过`MapDrawer`扩展可视化效果
-- 使用`board_analyzer_test_card.py`进行单元测试
+## 注意事项
+
+- 需要管理员权限运行
+- 确保游戏窗口可见且未被遮挡
+- 支持自定义模板和配置
+
+## 已知问题
+- 吃了无敌之后暂时没有好的识别办法
+- 加速的时候会反应不过来
