@@ -1,0 +1,10 @@
+area_diff: 0.3
+crop_area: 712,495,757,544
+frame_id: snake
+hsv_color: 85,150,200
+hsv_diff: 4,255,255
+image_path: ''
+shape_diff: 0.3
+shape_type: any
+template_id: diamond
+template_name: 钻石

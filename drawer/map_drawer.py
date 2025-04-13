@@ -83,39 +83,40 @@ class MapDrawer:
             cv2.line(screen_cv, (x, 0), (x, h), (255, 255, 255), 1)
     
     def _draw_special_cells(self, screen_cv):
-        """绘制特殊格子"""
+        """绘制所有非空格子并自动分配颜色"""
+        color_map = {
+            'speed_boost': (55, 55, 55),    # 深灰色
+            'score_boost': (255, 165, 0),   # 橙色
+            'own_head': (0, 255, 0),       # 绿色
+            'own_body': (255, 255, 255),   # 白色
+            'own_tail': (255, 50, 50),     # 蓝色
+            'enemy_head': (0, 255, 255),   # 黄色
+            'enemy_body': (128, 0, 0),     # 深红色
+            'enemy_tail': (128, 128, 0),   # 橄榄色
+            'mine': (255, 0, 255),         # 紫色
+            'unknow': (0, 0, 0),           # 黑色
+            # 默认颜色
+            'default': (128, 128, 128)     # 灰色
+        }
+
         for y, row in enumerate(self.board.cells):
             for x, cell in enumerate(row):
-                if cell.cell_type in ['speed_boost', 'score_boost', 'own_head', 'own_body','own_tail', 'enemy_head', 'enemy_body']:
-                    # 使用Board的get_cell_center获取中心点坐标
-                    center = self.board.get_cell_center(y, x)
-                    if center is None:
-                        continue
-                    center_x, center_y = center
+                if cell.cell_type == 'empty':
+                    continue
                     
-                    # 根据格子类型设置颜色
-                    if cell.cell_type == 'speed_boost':
-                        color = (55, 55, 55)  # 绿色
-                    elif cell.cell_type == 'score_boost':
-                        color = (255, 165, 0)  # 橙色
-                    elif cell.cell_type == 'own_head':
-                        color = (0,255,0)
-                    elif cell.cell_type == 'own_body':
-                        color = (255, 255, 255)  # 白色
-                    elif cell.cell_type == 'own_tail':
-                        color = (255, 50, 50)  # 蓝色
-                    elif cell.cell_type == 'enemy_head':
-                        color = (0, 255, 255)  # 黄色
-                    elif cell.cell_type == 'enemy_body':
-                        color = (128, 0, 0)  # 深红色
-                    elif cell.cell_type == 'know':
-                        color = (0, 0, 0)  # 黑色
+                center = self.board.get_cell_center(y, x)
+                if center is None:
+                    continue
                     
-                    # 在格子中心绘制X标记
-                    size = 10
-                    cv2.line(screen_cv, (center_x - size, center_y - size), (center_x + size, center_y + size), color, 3)
-                    cv2.line(screen_cv, (center_x - size, center_y + size), (center_x + size, center_y - size), color, 3)
-                    
+                center_x, center_y = center
+                color = color_map.get(cell.cell_type, color_map['default'])
+                
+                # 在格子中心绘制X标记
+                size = 10
+                cv2.line(screen_cv, (center_x - size, center_y - size), 
+                        (center_x + size, center_y + size), color, 3)
+                cv2.line(screen_cv, (center_x - size, center_y + size), 
+                        (center_x + size, center_y - size), color, 3)
     
     def _draw_cell_hsv(self, screen_cv):
         """绘制格子色调并显示HSV数值(带描边效果)"""

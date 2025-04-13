@@ -1,0 +1,10 @@
+area_diff: 0.3
+crop_area: 498,152,710,441
+frame_id: snake
+hsv_color: 135,100,255
+hsv_diff: 15,255,5
+image_path: ''
+shape_diff: 0.3
+shape_type: circle
+template_id: purple_snake
+template_name: 紫色蛇

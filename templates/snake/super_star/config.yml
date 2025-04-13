@@ -1,0 +1,10 @@
+area_diff: 0.3
+crop_area: 658,68,714,128
+frame_id: snake
+hsv_color: 25,142,250
+hsv_diff: 12,90,50
+image_path: ''
+shape_diff: 0.3
+shape_type: rectangle
+template_id: super_star
+template_name: 无敌之星

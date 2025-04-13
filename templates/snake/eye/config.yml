@@ -1,0 +1,10 @@
+area_diff: 0.3
+crop_area: 712,495,757,544
+frame_id: snake
+hsv_color: 0,0,255
+hsv_diff: 1,1,1
+image_path: ''
+shape_diff: 0.3
+shape_type: any
+template_id: eye
+template_name: 蛇眼

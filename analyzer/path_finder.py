@@ -28,36 +28,34 @@ class PathFinder(QObject):
         self.mid_risk_areas = set()
 
     def update_risk_areas(self, board):
-        self.high_risk_areas.clear()
-        self.low_risk_areas.clear()
-        self.mid_risk_areas.clear()
+        # 改为字典存储每个格子的风险分数
+        self.risk_scores = {}
 
         # === 标记地图边缘为高风险 ===
         for x in range(self.grid_width):
-            self.high_risk_areas.add((x, 0))
-            self.high_risk_areas.add((x, self.grid_height - 1))
+            self._add_risk_score((x, 0), 9)
+            self._add_risk_score((x, self.grid_height - 1), 9)
         for y in range(self.grid_height):
-            self.high_risk_areas.add((0, y))
-            self.high_risk_areas.add((self.grid_width - 1, y))
+            self._add_risk_score((0, y), 9)
+            self._add_risk_score((self.grid_width - 1, y), 9)
 
         # === 标记地图边缘外一格为中风险 ===
         for x in range(-1, self.grid_width + 1):
-            # 上下外一行
-            self.mid_risk_areas.add((x, -1))
-            self.mid_risk_areas.add((x, self.grid_height))
+            self._add_risk_score((x, -1), 3)
+            self._add_risk_score((x, self.grid_height), 3)
         for y in range(-1, self.grid_height + 1):
-            # 左右外一列
-            self.mid_risk_areas.add((-1, y))
-            self.mid_risk_areas.add((self.grid_width, y))
+            self._add_risk_score((-1, y), 3)
+            self._add_risk_score((self.grid_width, y), 3)
 
         # 标记敌方蛇头周围1格为高风险
-        if "enemy_head" in board.special_cells:
-            for cell in board.special_cells["enemy_head"]:
-                x, y = cell.col, cell.row
-                for dx, dy in [(0, -1), (0,1),(-1,0),(1,0)]:
-                    nx, ny = x + dx, y + dy
-                    if 0 <= nx < self.grid_width and 0 <= ny < self.grid_height:
-                        self.high_risk_areas.add((nx, ny))
+        for key in ['enemy_head', 'mine', 'unknow']:
+            if key in board.special_cells:
+                for cell in board.special_cells[key]:
+                    x, y = cell.col, cell.row
+                    for dx, dy in [(0, -1), (0,1),(-1,0),(1,0)]:
+                        nx, ny = x + dx, y + dy
+                        if 0 <= nx < self.grid_width and 0 <= ny < self.grid_height:
+                            self._add_risk_score((nx, ny), 9)
 
         # 敌方蛇身附近1格为中风险
         if "enemy_body" in board.special_cells:
@@ -66,16 +64,24 @@ class PathFinder(QObject):
                 for dx, dy in [(0, -1), (0,1),(-1,0),(1,0)]:
                     nx, ny = x + dx, y + dy
                     if 0 <= nx < self.grid_width and 0 <= ny < self.grid_height:
-                        self.mid_risk_areas.add((nx, ny))
+                        self._add_risk_score((nx, ny), 3)
 
         # 自己蛇身附近1格为低风险
-        if "own_body" in board.special_cells:
-            for cell in board.special_cells["own_body"]:
-                x, y = cell.col, cell.row
-                for dx, dy in [(0, -1), (0,1),(-1,0),(1,0)]:
-                    nx, ny = x + dx, y + dy
-                    if 0 <= nx < self.grid_width and 0 <= ny < self.grid_height:
-                        self.low_risk_areas.add((nx, ny))
+        for key in ['own_body', 'greed_speed']:
+            if key in board.special_cells:
+                for cell in board.special_cells[key]:
+                    x, y = cell.col, cell.row
+                    for dx, dy in [(0, -1), (0,1),(-1,0),(1,0)]:
+                        nx, ny = x + dx, y + dy
+                        if 0 <= nx < self.grid_width and 0 <= ny < self.grid_height:
+                            self._add_risk_score((nx, ny), 1)
+
+    def _add_risk_score(self, pos, score):
+        """辅助方法：累加风险分数"""
+        if pos in self.risk_scores:
+            self.risk_scores[pos] += score
+        else:
+            self.risk_scores[pos] = score
     
 
     def find_path(self, start, target, board, init_path=None, min_path_length=2, method='A'):
@@ -106,7 +112,6 @@ class PathFinder(QObject):
 
         # 判断起点
         if init_path and len(init_path) > 0:
-            # 续算起点
             new_start = init_path[-1]
             
             # 检查续寻起点是否可通行
@@ -122,35 +127,22 @@ class PathFinder(QObject):
         elif start:
             new_start = start
             init_path = []
-
         else:
-            # 无起点，报错
-
             return None
 
         # 检查目标点是否可达
         tx, ty = target
         if not (0 <= tx < self.grid_width and 0 <= ty < self.grid_height):
-
             return None
             
         target_cell = board.cells[ty][tx]
         target_type = target_cell.cell_type if target_cell else None
         if target_type not in ["empty", "score_boost", "own_head", "own_tail"]:
-
             return None
 
         # 定义风险权重
         def risk_penalty(x, y):
-            pos = (x, y)
-            if pos in self.high_risk_areas:
-                return 6
-            elif pos in self.mid_risk_areas:
-                return 3
-            elif pos in self.low_risk_areas:
-                return 1
-            else:
-                return 0
+            return self.risk_scores.get((x, y), 0)
 
         def heuristic(a, b):
             # 增加启发式函数权重，使路径更倾向于直线
@@ -369,15 +361,7 @@ class PathFinder(QObject):
                 moves = [(0, -1), (0, 1), (-1, 0), (1, 0)]
 
                 def risk_level(nx, ny):
-                    pos = (nx, ny)
-                    if pos in self.high_risk_areas:
-                        return 2
-                    elif hasattr(self, 'mid_risk_areas') and pos in self.mid_risk_areas:
-                        return 1.5
-                    elif pos in self.low_risk_areas:
-                        return 1
-                    else:
-                        return 0
+                    return self.risk_scores.get((x, y), 0)
 
                 def move_priority(m):
                     dx, dy = m
@@ -433,7 +417,30 @@ class PathFinder(QObject):
         score_boosts = []
         if "score_boost" in board.special_cells:
             for cell in board.special_cells["score_boost"]:
-                score_boosts.append((cell.col, cell.row))
+                x, y = cell.col, cell.row
+                is_safe = True
+                
+                # 检查周围3格范围
+                for dx in range(-3, 4):
+                    for dy in range(-3, 4):
+                        nx, ny = x + dx, y + dy
+                        # 如果超出边界，直接判定为不安全
+                        if not (0 <= nx < board.cols and 0 <= ny < board.rows):
+                            is_safe = False
+                            break
+                        # 检查格子类型
+                        cell_type = board.cells[ny][nx].cell_type
+                        if cell_type not in ["empty", "own_head", "own_body", "own_tail", "score_boost"]:
+                            is_safe = False
+                            break
+                    if not is_safe:
+                        break
+                
+                if is_safe:
+                    score_boosts.append((x, y))
+                elif self.logger:
+                    self.logger.debug(f"[寻路] 分数点({x},{y})周围3格内存在危险或超出边界，跳过")
+        
         
         # 没有分数点时直接返回None
         if not score_boosts:
@@ -444,10 +451,6 @@ class PathFinder(QObject):
             for target in score_boosts:
                 # 确保目标点是有效的
                 if not (0 <= target[0] < board.cols and 0 <= target[1] < board.rows):
-                    continue
-
-                # 新增：忽略边缘两格以内的分数点
-                if target[0] < 2 or target[0] >= board.cols - 2 or target[1] < 2 or target[1] >= board.rows - 2:
                     continue
                     
                 path1 = self.find_path(self.start_pos, target, board, method=method, min_path_length=3)
@@ -469,13 +472,10 @@ class PathFinder(QObject):
                         if path2:
                             return path2
                         else:
-                            # 无法拼出逃生路径，判定死路
                             continue
                     else:
-                        # 没有任何逃生点，死路
                         continue
-                    
-        # 兜底：如果完全没有找到转移到安全区的路径，判死路
+
         return None
 
     def find_safe_path(self, board):
@@ -532,36 +532,45 @@ class PathFinder(QObject):
 
     def find_path_to_nearest_empty(self, board):
         """
-        寻找离蛇头最近、且可以走的空格；若没有就用随机方向兜底
+        在必死情况下快速寻找任意可行路径
         """
         self.current_direction = board.direction
+        
+        # 快速定位蛇头
+        if "own_head" not in board.special_cells or not board.special_cells["own_head"]:
+            return None
+        head_cell = board.special_cells["own_head"][0]
+        head_pos = (head_cell.col, head_cell.row)
 
-        # 定位蛇头
-        head_pos = None
-        for r in range(board.rows):
-            for c in range(board.cols):
-                cell = board.cells[r][c]
-                if cell and cell.cell_type == "own_head":
-                    head_pos = (c, r)
-                    break
-            if head_pos:
-                break
-        if not head_pos:
+        def dfs(pos, depth, visited):
+            if depth >= 5:  # 找到长度>=5的路径就返回
+                return visited + [pos]
+            
+            x, y = pos
+            # 直接使用固定顺序，不再考虑风险
+            moves = [(0, -1), (0, 1), (-1, 0), (1, 0)]
+            
+            for dx, dy in moves:
+                nx, ny = x + dx, y + dy
+                next_pos = (nx, ny)
+                
+                # 只检查基本可行性
+                if (next_pos in visited or 
+                    not (0 <= nx < board.cols and 0 <= ny < board.rows)):
+                    continue
+                    
+                cell = board.cells[ny][nx]
+                if not cell or cell.cell_type not in ["empty", "score_boost"]:
+                    continue
+                
+                result = dfs(next_pos, depth + 1, visited + [pos])
+                if result:
+                    return result
+            
             return None
 
-        dirs = self.get_available_directions(board, head_pos)
-        if dirs:
-            next_dir = random.choice(dirs)
-            x, y = head_pos
-            if next_dir == "up":
-                return [head_pos, (x, y - 1)]
-            elif next_dir == "down":
-                return [head_pos, (x, y + 1)]
-            elif next_dir == "left":
-                return [head_pos, (x - 1, y)]
-            elif next_dir == "right":
-                return [head_pos, (x + 1, y)]
-        return None
+        # 直接深搜，不再迭代加深
+        return dfs(head_pos, 0, [])
 
     def get_available_directions(self, board, current_pos):
         """
@@ -669,7 +678,6 @@ class PathFinder(QObject):
         返回：
             路径 或 None
         """
-
         path = self.find_path_to_score_boost(board)
         if path:
             return path

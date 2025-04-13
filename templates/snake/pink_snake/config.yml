@@ -1,0 +1,10 @@
+area_diff: 0.3
+crop_area: 498,152,710,441
+frame_id: snake
+hsv_color: 168,255,255
+hsv_diff: 12,120,5
+image_path: ''
+shape_diff: 0.3
+shape_type: circle
+template_id: pink_snake
+template_name: 粉蛇

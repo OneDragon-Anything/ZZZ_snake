@@ -1,0 +1,10 @@
+area_diff: 0.3
+crop_area: 60,192,135,265
+frame_id: snake
+hsv_color: 0,100,0
+hsv_diff: 2,70,255
+image_path: ''
+shape_diff: 0.3
+shape_type: circle
+template_id: mine
+template_name: 地雷

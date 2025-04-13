@@ -20,6 +20,9 @@ class SnakeController:
         
     def control_snake(self, direction):
         if not direction:
+            # 松开所有方向键
+            for key in ['w', 's', 'a', 'd']:
+                self.keyboard_controller.release(keyboard.KeyCode.from_char(key))
             self.current_direction = None
             return
         
@@ -29,20 +32,23 @@ class SnakeController:
             'left': 'a',
             'right': 'd'
         }
-        direction = direction_map.get(direction.lower(), direction)
+        new_direction = direction_map.get(direction.lower(), direction)
         
         try:
-            # 不管方向是否改变，始终按一下键
-            # if direction == self.current_direction:
-            #     return
+            # 如果方向改变，先松开当前方向键
+            if self.current_direction and self.current_direction != new_direction:
+                self.keyboard_controller.release(keyboard.KeyCode.from_char(self.current_direction))
             
-            key = keyboard.KeyCode.from_char(direction)
+            # 松开其他方向键
+            for key in direction_map.values():
+                if key != new_direction:
+                    self.keyboard_controller.release(keyboard.KeyCode.from_char(key))
+            
+            # 按下新方向键
+            key = keyboard.KeyCode.from_char(new_direction)
             self.keyboard_controller.press(key)
-            time.sleep(0.02)  # 模拟按下持续时间
-            self.keyboard_controller.release(key)
-                
             self.last_press_time = time.time()
-            self.current_direction = direction
+            self.current_direction = new_direction
         except Exception as e:
             if self.logger:
                 self.logger.log(f"控制蛇移动出错: {str(e)}")

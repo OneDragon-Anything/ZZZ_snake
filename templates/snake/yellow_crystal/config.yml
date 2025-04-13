@@ -1,0 +1,10 @@
+area_diff: 0.3
+crop_area: 219,17,266,74
+frame_id: snake
+hsv_color: 25,100,255
+hsv_diff: 7,110,5
+image_path: ''
+shape_diff: 0.3
+shape_type: circle
+template_id: yellow_crystal
+template_name: 黄水晶

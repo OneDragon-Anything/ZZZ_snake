@@ -6,6 +6,7 @@ from PyQt5.QtCore import QThread, pyqtSignal
 from mainwindow import MainWindow
 from player.snake_player import SnakePlayer
 import time
+import cv2
 # 创建蛇玩家线程类
 class SnakePlayerThread(QThread):
     board_updated = pyqtSignal(object, object, float, float, float, float, float, str, object)
@@ -37,20 +38,27 @@ class SnakePlayerThread(QThread):
                     continue
                 
                 # 捕获屏幕
+                capture_start = time.time()
                 self.snake_player.test_time=time.time()
                 screen_cv = self.snake_player.capture_screen(self.hwnd)
+                capture_time = time.time() - capture_start
+                # print(f"截图用时: {capture_time*1000:.1f}ms")
+                
                 if screen_cv is None:
                     error_count += 1
-                    if error_count >= 3 and self.snake_player.logger:  # 连续3次失败才记录
+                    if error_count >= 3 and self.snake_player.logger:
                         self.snake_player.logger.log("画面捕获失败，请检查游戏窗口是否正常")
-                        error_count = 0  # 重置计数器
-                    self.msleep(500)  # 捕获失败时降低重试频率
+                        error_count = 0
+                    self.msleep(500)
                     continue
                 
                 # 处理帧
-                error_count = 0  # 成功后重置错误计数
-                
+                error_count = 0
+                process_start = time.time()
                 self.snake_player.process_frame(screen_cv, self.hwnd)
+                process_time = time.time() - process_start
+                # print(f"处理用时: {process_time*1000:.1f}ms")
+                
             except Exception as e:
                 if self.snake_player.logger:
                     self.snake_player.logger.log(f"线程运行错误: {str(e)}")
@@ -58,7 +66,7 @@ class SnakePlayerThread(QThread):
                 continue
                 
             # 控制帧率
-            self.msleep(2)  # 约20帧每秒
+            self.msleep(1)  # 约20帧每秒
     
     def stop(self):
         """停止线程"""
@@ -87,7 +95,8 @@ if __name__ == "__main__":
     if not is_admin():
         run_as_admin()
         sys.exit()
-        
+    
+    cv2.ocl.setUseOpenCL(True)
     app = QApplication(sys.argv)
     
     # 创建蛇玩家线程（默认不启动）

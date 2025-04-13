@@ -1,0 +1,10 @@
+area_diff: 0.3
+crop_area: 911,5,946,89
+frame_id: snake
+hsv_color: 25,255,255
+hsv_diff: 9,5,5
+image_path: ''
+shape_diff: 0.3
+shape_type: circle
+template_id: yellow_snake
+template_name: 黄色蛇

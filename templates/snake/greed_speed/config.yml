@@ -1,0 +1,10 @@
+area_diff: 0.3
+crop_area: 60,757,97,793
+frame_id: snake
+hsv_color: 71,178,255
+hsv_diff: 5,255,50
+image_path: ''
+shape_diff: 0.3
+shape_type: rectangle
+template_id: greed_speed
+template_name: 绿加速

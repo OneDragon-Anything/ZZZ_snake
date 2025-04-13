@@ -235,13 +235,11 @@ class BoardAnalyzerTestCard(QWidget):
         board = self.analyzer.analyze_board(board, self.current_hsv, 'HSV', self.current_direction)
         analyze_end = time.time()
 
-        print(f"开始寻路{self.analyzer.is_running}")
         path = None
         path_time = 0
         if self.path_finding_switch.isChecked() and self.analyzer.is_running:
             pf = PathFinder(board.rows, board.cols, self.logger)
             path_start = time.time()
-            print("寻路完成")
             path = pf.find_path_in_order(board)
             path_end = time.time()
             path_time = path_end - path_start
