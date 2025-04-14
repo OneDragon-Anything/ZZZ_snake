@@ -497,8 +497,8 @@ class PathFinder(QObject):
                 # 为每个分数点创建安全标志
                 safe_flags = np.ones(len(boost_coords), dtype=bool)
                 
-                # 创建周围3格的偏移量数组
-                offsets = np.array([(dx, dy) for dx in range(-3, 4) for dy in range(-3, 4)])
+                # 创建周围1格的偏移量数组
+                offsets = np.array([(dx, dy) for dx in range(-1, 2) for dy in range(-1, 2)])
                 
                 # 对每个分数点检查安全性
                 for i, (x, y) in enumerate(boost_coords):
@@ -543,89 +543,64 @@ class PathFinder(QObject):
         if not score_boosts:
             return None
 
-        # 尝试两种寻路方法，增加成功率
-        for method in ["A"]:
-            for target in score_boosts:
-                # 确保目标点是有效的
-                if not (0 <= target[0] < board.cols and 0 <= target[1] < board.rows):
+        for target in score_boosts:
+            # 确保目标点是有效的
+            if not (0 <= target[0] < board.cols and 0 <= target[1] < board.rows):
+                continue
+
+            path1 = self.find_path(
+                self.start_pos, target, board, method="A", min_path_length=3
+            )
+            if path1:
+                if path1[-1] != target:
                     continue
 
-                path1 = self.find_path(
-                    self.start_pos, target, board, method=method, min_path_length=3
-                )
-                if path1:
-                    if path1[-1] != target:
-                        continue
-
-                    # 找到去score的路后，尝试接上安全区域
-                    rect = self.find_largest_empty_rectangle(board)
-                    x0, y0, w, h = rect
-                    if w > 0 and h > 0:
-                        safe_target = (x0 + w // 2, y0 + h // 2)
-                    else:
-                        safe_target = self.find_furthest_from_enemy_heads_bfs(board)
-
-                    # 如果有安全点，考虑拼接逃生路径
-                    if safe_target:
-                        path2 = self.find_path(
-                            None,
-                            safe_target,
-                            board,
-                            init_path=path1,
-                            min_path_length=5,
-                            method=method,
-                        )
-                        if path2:
-                            return path2
-                        else:
-                            continue
-                    else:
-                        continue
+                # 找到去score的路后，尝试接上安全区域
+                # 获取所有矩形中心点，按面积从大到小排序
+                centers = self.find_largest_empty_rectangle(board)
+                
+                # 尝试所有矩形中心点，从大到小
+                for center_x, center_y in centers:
+                    safe_target = (center_x, center_y)
+                    path2 = self.find_path(
+                        None,
+                        safe_target,
+                        board,
+                        init_path=path1,
+                        min_path_length=5,
+                        method="A",
+                    )
+                    if path2:
+                        return path2
 
         return None
 
     def find_safe_path(self, board):
         """
         智能逃生策略：
-        先尝试最大空白矩形的中心点逃跑，
-        再退而求其次寻找距离敌方蛇头最远的空白格
+        1. 尝试所有空白矩形中心点（按面积从大到小）
+        2. 尝试距离敌方蛇头最远的点
+        3. 尝试任意可达的空白点
         """
-        # 1. 最大空白矩形 中心点
-        x, y, w, h = self.find_largest_empty_rectangle(board)
-        if w > 0 and h > 0:
-            center_x = x + w // 2
-            center_y = y + h // 2
-            path = self.find_path(
-                self.start_pos,
-                (center_x, center_y),
-                board,
-                min_path_length=3,
-                method="B",
-            )
-            if path:
-                return path
+        # 1. 尝试所有矩形中心点
+        centers = self.find_largest_empty_rectangle(board)
+        for center_x, center_y in centers:
+            # 检查中心点是否可通行
+            if 0 <= center_x < board.cols and 0 <= center_y < board.rows:
+                cell = board.cells[center_y][center_x]
+                if cell and cell.cell_type == "empty":
+                    path = self.find_path(
+                        self.start_pos,
+                        (center_x, center_y),
+                        board,
+                        min_path_length=3,
+                        method="A",  # 优先使用A*算法
+                    )
+                    if path:
+                        return path
 
-        # 2. 距离敌头最远的点
-        safe_target = self.find_furthest_from_enemy_heads_bfs(board)
-        if safe_target:
-            pathA = self.find_path(
-                None,
-                safe_target,
-                board,
-                min_path_length=5,
-                method="A",
-            )
-            if pathA:
-                return pathA
-            else:
-                pathB = self.find_path(
-                    self.start_pos, safe_target, board, min_path_length=3, method="B"
-                )
-                if pathB:
-                    return pathB
-
-        # 3. 全失败，放弃
-        return None
+        # 3. 尝试寻找最近出路
+        return self.find_path_to_nearest(board)
 
     def find_path_to_tail(self, board):
         """
@@ -654,48 +629,47 @@ class PathFinder(QObject):
 
         return None
 
-    def find_path_to_nearest_empty(self, board):
+    def find_path_to_nearest(self, board):
         """
-        在必死情况下快速寻找任意可行路径
+        基于风险评估的安全路径寻找
+        直接寻找一条风险最小的可行路径
         """
-        self.current_direction = board.direction
-
-        # 快速定位蛇头
         if "own_head" not in board.special_cells or not board.special_cells["own_head"]:
             return None
         head_cell = board.special_cells["own_head"][0]
-        head_pos = (head_cell.col, head_cell.row)
-
-        def dfs(pos, depth, visited):
-            if depth >= 5:  # 找到长度>=5的路径就返回
-                return visited + [pos]
-
-            x, y = pos
-            # 直接使用固定顺序，不再考虑风险
-            moves = [(0, -1), (0, 1), (-1, 0), (1, 0)]
-
-            for dx, dy in moves:
-                nx, ny = x + dx, y + dy
-                next_pos = (nx, ny)
-
-                # 只检查基本可行性
-                if next_pos in visited or not (
-                    0 <= nx < board.cols and 0 <= ny < board.rows
-                ):
-                    continue
-
-                cell = board.cells[ny][nx]
-                if not cell or cell.cell_type not in ["empty", "score_boost"]:
-                    continue
-
-                result = dfs(next_pos, depth + 1, visited + [pos])
-                if result:
-                    return result
-
-            return None
-
-        # 直接深搜，不再迭代加深
-        return dfs(head_pos, 0, [])
+        self.start_pos = (head_cell.col, head_cell.row)
+        
+        rows, cols = board.rows, board.cols
+        # 创建安全度矩阵（风险的反面）
+        safety_map = np.zeros((rows, cols), dtype=np.float32)
+        
+        # 找出所有可能的目标点
+        targets = []
+        for y in range(rows):
+            for x in range(cols):
+                cell = board.cells[y][x]
+                if cell and cell.cell_type == "empty":
+                    # 计算安全度（风险值越高安全度越低）
+                    risk = self.risk_array[y+1, x+1]
+                    if risk < 5:  # 只考虑低风险区域
+                        targets.append((x, y))
+        
+        # 按照到蛇头的距离排序目标点
+        targets.sort(key=lambda p: abs(p[0] - self.start_pos[0]) + abs(p[1] - self.start_pos[1]))
+        
+        # 尝试寻找到每个候选点的路径
+        for x, y in targets:
+            path = self.find_path(
+                self.start_pos,
+                (x, y),
+                board,
+                min_path_length=3,
+                method="A"
+            )
+            if path:
+                return path
+                
+        return None
 
     def get_available_directions(self, board, current_pos):
         """
@@ -716,130 +690,244 @@ class PathFinder(QObject):
 
     def find_largest_empty_rectangle(self, board):
         """
-        动态规划+单调栈，寻找最大空白矩形
-        返回：(左上角x, 左上角y, 宽度w, 高度h)
+        使用基于“柱状图中最大矩形”的优化算法寻找所有空白矩形。
+        返回：按面积从大到小排序的矩形中心坐标列表 [(x1,y1), (x2,y2), ...]
         """
         rows, cols = board.rows, board.cols
-        
-        # 使用NumPy数组替代嵌套列表，提高性能
-        heights = np.zeros((rows, cols), dtype=np.int32)
-        max_area = 0
-        max_rect = (0, 0, 0, 0)
+        if rows == 0 or cols == 0:
+            return []
 
-        # 创建空白格子的掩码
+        # 预计算空白掩码，提高后续访问速度
         empty_mask = np.zeros((rows, cols), dtype=bool)
-        
-        # 一次性检查所有单元格
-        for y in range(rows):
-            for x in range(cols):
-                cell = board.cells[y][x]
-                if cell and cell.cell_type == "empty":
-                    empty_mask[y, x] = True
-        
-        # 计算高度图 - 使用向量化操作
-        for y in range(rows):
-            if y > 0:
-                # 当前行的高度 = 如果是空白格，则为上一行高度+1，否则为0
-                heights[y] = np.where(empty_mask[y], heights[y-1] + 1, 0)
-            else:
-                # 第一行直接使用空白掩码
-                heights[0] = empty_mask[0].astype(np.int32)
+        for r in range(rows):
+            for c in range(cols):
+                cell = board.cells[r][c]
+                # 允许在自身头部/尾部形成的矩形区域内寻找中心点
+                if cell and cell.cell_type in ["empty", "own_head", "own_tail", "score_boost"]:
+                     empty_mask[r, c] = True
 
-        # 对每一行做直方图最大矩形
-        for y in range(rows):
-            # 使用NumPy数组存储直方图，避免列表拼接操作
-            hist = np.zeros(cols + 1, dtype=np.int32)
-            hist[:cols] = heights[y]
-            # hist[cols] 默认为0，作为哨兵
-            
-            stack = []
-            for i in range(cols + 1):
-                while stack and hist[i] < hist[stack[-1]]:
-                    top_idx = stack.pop()
-                    h = hist[top_idx]
-                    w = i if not stack else i - stack[-1] - 1
-                    area = h * w
-                    if area > max_area:
-                        max_area = area
-                        # 计算矩形左上坐标位置
-                        left = stack[-1] + 1 if stack else 0
-                        top = y - h + 1
-                        max_rect = (left, top, w, h)
-                stack.append(i)
-        return max_rect  # (x, y, w, h)
+        heights = np.zeros(cols, dtype=int) # 存储当前行每个位置向上的连续空单元格高度
+        rectangles = [] # 存储找到的矩形信息 (area, center_x, center_y)
 
-    def find_furthest_from_enemy_heads_bfs(self, board):
+        for r in range(rows):
+            # 1. 更新当前行的高度数组
+            for c in range(cols):
+                if empty_mask[r, c]:
+                    heights[c] += 1
+                else:
+                    heights[c] = 0 # 遇到障碍物，高度归零
+
+            # 2. 计算当前高度数组（柱状图）中的最大矩形
+            # 使用栈来高效计算，添加哨兵简化边界处理
+            stack = [-1] # 栈底哨兵
+            heights_with_sentinel = np.append(heights, 0) # 末尾哨兵
+
+            for c, h in enumerate(heights_with_sentinel):
+                # 当遇到更短的柱子或末尾哨兵时，处理栈中更高的柱子
+                while heights_with_sentinel[stack[-1]] > h:
+                    height = heights_with_sentinel[stack.pop()]
+                    # 栈顶弹出后，新的栈顶就是左边界（不包含）
+                    width = c - stack[-1] - 1
+
+                    if height > 0 and width > 0:
+                        area = height * width
+                        # 计算矩形的实际坐标范围
+                        # 左上角: (stack[-1] + 1, r - height + 1)
+                        # 右下角: (c - 1, r)
+                        center_x = (stack[-1] + 1 + c - 1) // 2
+                        center_y = (r - height + 1 + r) // 2
+                        rectangles.append((area, center_x, center_y))
+
+                # 将当前柱子索引压入栈
+                stack.append(c)
+
+            # 清理 heights_with_sentinel 添加的哨兵 (虽然NumPy append不修改原数组，但明确一下)
+            # heights = heights_with_sentinel[:-1] # 不需要这行，因为下一轮会重新计算
+
+        # 3. 按面积从大到小排序
+        rectangles.sort(reverse=True, key=lambda x: x[0])
+
+        # 4. 过滤掉重复的中心点（面积大的优先）
+        unique_centers = []
+        seen_centers = set()
+        for area, cx, cy in rectangles:
+            if (cx, cy) not in seen_centers:
+                 # 检查中心点本身是否可通行 (虽然是矩形中心，但可能刚好落在障碍上)
+                 # 这一步检查可以根据实际需求决定是否需要，如果只是需要一个"空旷区域的代表点"，
+                 # 即使中心点本身不可走，它代表的区域也是存在的。
+                 # 如果需要目标点本身必须可走，则取消下面的注释
+                 # if 0 <= cy < rows and 0 <= cx < cols and empty_mask[cy, cx]:
+                     unique_centers.append((cx, cy))
+                     seen_centers.add((cx, cy))
+
+        # 只返回中心坐标列表
+        # return [(x, y) for (area, x, y) in rectangles]
+        return unique_centers
+
+    def find_escape_route(self, board):
         """
-        BFS从所有敌人头开始扩散，找到最远的空白格子
-        返回：(x,y)
+        极速逃生策略：在面临直接碰撞风险时，快速选择一个最不坏的邻近格子。
+        优先考虑生存，其次考虑低风险和开阔度。
+        返回：一个包含当前位置和下一步位置的列表 [current_pos, next_pos]，或 None (无路可走)。
         """
-        rows, cols = board.rows, board.cols
-        # 使用NumPy数组替代嵌套列表
-        dist_map = np.full((rows, cols), -1, dtype=np.int32)
-        from collections import deque
+        if not hasattr(board, 'special_cells') or "own_head" not in board.special_cells:
+            return None
 
-        queue = deque()
-        # 初始化：敌头集合
-        for key in ["enemy_head", "enemy2_head", "enemy3_head"]:
-            heads = board.special_cells.get(key, [])
-            if not heads:
+        head_cell = board.special_cells["own_head"][0]
+        self.start_pos = (head_cell.col, head_cell.row)
+        start_x, start_y = self.start_pos
+
+        # 获取当前方向向量
+        current_direction_vector = self._get_current_direction(board, self.start_pos)
+
+        # 定义移动方向 (dx, dy)
+        moves = [(0, -1), (0, 1), (-1, 0), (1, 0)]  # 上下左右
+        possible_next_steps = []  # 存储 (得分, (nx, ny))
+
+        # 遍历所有邻居
+        for dx, dy in moves:
+            # 排除向后移动
+            if current_direction_vector and (dx, dy) == (-current_direction_vector[0], -current_direction_vector[1]):
                 continue
-                
-            # 批量处理敌人头部位置
-            head_coords = [(cell.col, cell.row) for cell in heads]
-            for x, y in head_coords:
-                dist_map[y, x] = 0
-                queue.append((x, y))
 
-        # 预先创建方向数组
-        directions = np.array([(-1, 0), (1, 0), (0, -1), (0, 1)], dtype=np.int32)
+            next_x, next_y = start_x + dx, start_y + dy
+            next_pos = (next_x, next_y)
+
+            # 检查边界
+            if not (0 <= next_x < board.cols and 0 <= next_y < board.rows):
+                continue
+
+            # 检查障碍物
+            cell = board.cells[next_y][next_x]
+            cell_type = cell.cell_type if cell else "wall"
+
+            # 绝对不能走的格子
+            lethal_types = {"enemy_head", "enemy_body", "mine", "own_body"}
+            if cell_type in lethal_types:
+                continue
+
+            # 评分系统
+            score = 50  # 基础生存分
+
+            # 格子类型加分
+            type_scores = {
+                "empty": 20,
+                "score_boost": 25,
+                "own_tail": 10
+            }
+            score += type_scores.get(cell_type, 0)
+
+            # 风险评估
+            risk = self.risk_array[next_y + 1, next_x + 1]
+            score -= risk * 2
+
+            # 评估开阔度
+            openness = sum(1 for ndx, ndy in moves
+                         if 0 <= next_x + ndx < board.cols
+                         and 0 <= next_y + ndy < board.rows
+                         and board.cells[next_y + ndy][next_x + ndx].cell_type
+                         in ["empty", "score_boost", "own_tail"])
+            score += openness * 5
+
+            possible_next_steps.append((score, next_pos))
+
+        if not possible_next_steps:
+            if self.logger:
+                self.logger.warning(f"[紧急逃生] 位置 ({start_x},{start_y}) 周围无路可走!")
+            return None
+
+        # 选择最佳方向
+        possible_next_steps.sort(key=lambda item: item[0], reverse=True)
+        best_next_pos = possible_next_steps[0][1]
         
-        # BFS扩散距离
-        while queue:
-            x, y = queue.popleft()
-            # 计算所有邻居位置
-            neighbors = np.array([(x, y)]) + directions
-            
-            # 批量检查边界条件
-            valid_mask = (neighbors[:, 0] >= 0) & (neighbors[:, 0] < cols) & \
-                         (neighbors[:, 1] >= 0) & (neighbors[:, 1] < rows)
-            
-            for i, valid in enumerate(valid_mask):
-                if not valid:
+        if self.logger:
+            self.logger.info(f"[紧急逃生] 从 ({start_x},{start_y}) 选择逃向 {best_next_pos}，得分: {possible_next_steps[0][0]}")
+
+        return [self.start_pos, best_next_pos]
+
+    def _flood_fill_area_estimate(self, start_node, board, max_cells_to_visit):
+        """
+        辅助函数：从 start_node 开始进行受限的洪水填充/BFS，
+        计算在 max_cells_to_visit 限制内能访问到的安全空格数量。
+        """
+        if not start_node:
+            return 0
+
+        # 定义常量
+        MOVES = [(0, -1), (0, 1), (-1, 0), (1, 0)]  # 上下左右
+        SAFE_TYPES = {"empty", "score_boost", "own_tail"}
+        PASSABLE_TYPES = {"empty", "score_boost", "own_tail", "own_head"}
+
+        # 使用maxlen限制队列大小
+        q = deque([start_node], maxlen=max_cells_to_visit)
+        visited = {start_node}
+        area_count = 0
+        cells_visited_count = 0
+
+        # 检查起始节点
+        start_x, start_y = start_node
+        if not (0 <= start_x < board.cols and 0 <= start_y < board.rows):
+            return 0
+
+        start_cell = board.cells[start_y][start_x]
+        start_type = start_cell.cell_type if start_cell else "wall"
+        
+        if start_type in SAFE_TYPES:
+            area_count = 1
+        elif start_type not in ["own_head"]:
+            return 0
+
+        while q and cells_visited_count < max_cells_to_visit:
+            current_x, current_y = q.popleft()
+            cells_visited_count += 1
+
+            # 使用NumPy进行向量化计算
+            neighbors = np.array([(current_x + dx, current_y + dy) for dx, dy in MOVES])
+            valid_mask = (
+                (neighbors[:, 0] >= 0) & (neighbors[:, 0] < board.cols) &
+                (neighbors[:, 1] >= 0) & (neighbors[:, 1] < board.rows)
+            )
+
+            for nx, ny in neighbors[valid_mask]:
+                next_node = (nx, ny)
+                if next_node in visited:
                     continue
-                    
-                nx, ny = neighbors[i]
+
                 cell = board.cells[ny][nx]
-                if not cell or cell.cell_type != "empty":
-                    continue
-                if dist_map[ny, nx] == -1:
-                    dist_map[ny, nx] = dist_map[y, x] + 1
-                    queue.append((nx, ny))
+                cell_type = cell.cell_type if cell else "wall"
 
-        # 创建空白格子掩码
-        empty_mask = np.zeros((rows, cols), dtype=bool)
-        for y in range(rows):
-            for x in range(cols):
-                cell = board.cells[y][x]
-                if cell and cell.cell_type == "empty":
-                    empty_mask[y, x] = True
-        
-        # 将非空白格子的距离设为-1
-        dist_map = np.where(empty_mask, dist_map, -1)
-        
-        # 找到最大距离的位置
-        max_dist = np.max(dist_map)
-        if max_dist == -1:
+                if cell_type in PASSABLE_TYPES:
+                    visited.add(next_node)
+                    q.append(next_node)
+                    if cell_type in SAFE_TYPES:
+                        area_count += 1
+                else:
+                    visited.add(next_node)
+
+        return area_count
+
+    def _get_current_direction(self, board, head_pos):
+        """获取蛇当前运动方向"""
+        if not hasattr(board, 'own_snake'):
             return None
             
-        # 找到所有最大距离的位置
-        y_indices, x_indices = np.where(dist_map == max_dist)
-        if len(y_indices) == 0:
-            return None
-            
-        # 如果有多个最远点，随机选择一个
-        idx = 0 if len(y_indices) == 1 else np.random.randint(0, len(y_indices))
-        return (int(x_indices[idx]), int(y_indices[idx]))
+        head_x, head_y = head_pos
+        current_direction_vector = None
+        
+        if len(board.own_snake) >= 2:
+            prev_x, prev_y = board.own_snake[1]
+            current_direction_vector = (head_x - prev_x, head_y - prev_y)
+        elif hasattr(board, 'direction') and board.direction:
+            dir_map = {
+                "up": (0, -1),
+                "down": (0, 1),
+                "left": (-1, 0),
+                "right": (1, 0)
+            }
+            if board.direction in dir_map:
+                current_direction_vector = dir_map[board.direction]
+                
+        return current_direction_vector
 
     def find_path_in_order(self, board):
         """
@@ -848,6 +936,7 @@ class PathFinder(QObject):
         返回：
             路径 或 None
         """
+
         path = self.find_path_to_score_boost(board)
         if path:
             return path
@@ -860,7 +949,4 @@ class PathFinder(QObject):
         if path:
             return path
 
-        path = self.find_path_to_nearest_empty(board)
-        if path:
-            return path
         return None

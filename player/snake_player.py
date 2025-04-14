@@ -195,9 +195,6 @@ class SnakePlayer(QObject):
             return None, None, []
 
         self._update_frame_time()
-        
-        # 每帧检查是否需要执行缓存方向
-        self._execute_cached_directions(hwnd)
 
         try:
             game_state, board = self._analyze_frame(screen_cv)
@@ -207,15 +204,20 @@ class SnakePlayer(QObject):
             self._evaluate_current_path()
 
             if game_state == "running":
+                if self.logger:
+                    self.logger.debug(f"[状态] 游戏运行中，当前路径长度:{len(self.current_path)}，方向:{self.current_direction}")
                 self._handle_running_state(hwnd)
             elif game_state == "game_over":
+                if self.logger:
+                    self.logger.debug("[状态] 游戏结束，准备重新开始")
                 self._handle_game_over_state(hwnd)
 
             self._emit_board_update(game_state)
             return game_state, self.board, self.current_path
 
         except Exception as e:
-            self.log_error("处理帧异常", e)
+            if self.logger:
+                self.logger.error(f"[错误] 处理帧异常: {str(e)}")
             return None, None, []
 
     def _check_prerequisites(self) -> bool:
@@ -235,6 +237,8 @@ class SnakePlayer(QObject):
         analyze_start = time.time()
         try:
             if self.board is None:
+                if self.logger:
+                    self.logger.debug("[分析] 初始化新棋盘")
                 self.board = Board(
                     self.BOARD_HEIGHT,
                     self.BOARD_WIDTH,
@@ -251,12 +255,16 @@ class SnakePlayer(QObject):
             self.board.snake_player = self
 
             game_state = self._determine_game_state()
+            if self.logger:
+                self.logger.debug(f"[分析] 游戏状态: {game_state}, 蛇头位置: {self.board.head_position}")
+            
             self.predict_or_update_head(self.board)
             self.analyze_time = time.time() - analyze_start
             return game_state, self.board
 
         except Exception as e:
-            self.log_error("图像分析错误", e)
+            if self.logger:
+                self.logger.error(f"[错误] 图像分析错误: {str(e)}")
             return None, None
 
     def _determine_game_state(self) -> str:
@@ -339,7 +347,7 @@ class SnakePlayer(QObject):
             (c.col, c.row) for c in board.special_cells.get("enemy_head", [])
         ]
 
-        for pos in self.current_path[1:6]:
+        for pos in self.current_path[0:6]:
             if not self._is_safe_position(board, pos, enemy_heads):
                 return self.find_new_path()
 
@@ -359,7 +367,7 @@ class SnakePlayer(QObject):
 
         # 检查敌人距离
         for ex, ey in enemy_heads:
-            if abs(x - ex) + abs(y - ey) < 1:
+            if abs(x - ex) + abs(y - ey) < 2:
                 self.log_debug(
                     f"[路径评估] 清空路径：敌人蛇头({ex},{ey})距离路径点({x},{y})过近"
                 )
@@ -370,12 +378,23 @@ class SnakePlayer(QObject):
     def control_snake_by_path(self, hwnd):
         """根据路径控制蛇移动"""
         if not self._prepare_snake_control(hwnd):
+            if self.logger:
+                self.logger.debug("[控制] 蛇控制准备失败，跳过移动")
+            return
+
+        # 检查是否需要执行缓存方向
+        if self.cached_directions:
+            if self.logger:
+                self.logger.debug(f"[控制] 执行缓存方向: {self.cached_directions[0]}")
+            self._execute_cached_directions(hwnd)
             return
 
         # 使用预测坐标代替实际观察坐标
         if not self.predicted_head_pos:
             real_head = self._get_snake_head()
             if not real_head:
+                if self.logger:
+                    self.logger.debug("[控制] 未找到蛇头位置")
                 return
             head_pos = real_head
         else:
@@ -383,10 +402,14 @@ class SnakePlayer(QObject):
 
         target = self._find_next_target(head_pos)
         if not target:
+            if self.logger:
+                self.logger.debug("[控制] 未找到下一个目标点")
             return
 
         direction = self._calculate_direction(head_pos, target)
         if direction:
+            if self.logger:
+                self.logger.debug(f"[控制] 移动方向: {direction}, 从({head_pos[0]},{head_pos[1]})到({target[0]},{target[1]})")
             self.snake_move(
                 hwnd,
                 direction,
@@ -402,9 +425,6 @@ class SnakePlayer(QObject):
             return False
 
         if len(self.current_path) < 2:
-            return False
-
-        if len(self.cached_directions) > 0:
             return False
 
         return True
@@ -520,13 +540,17 @@ class SnakePlayer(QObject):
     def _execute_cached_directions(self, hwnd):
         """执行缓存的移动方向"""
         now = time.time()
-        if now - self.last_execute_time < self.MOVE_INTERVAL:
+        if now - self.last_execute_time < 0.19:
             return
             
         if not self.cached_directions:
             return
-            
         direction = self.cached_directions.pop(0)
+
+        # 执行移动后更新当前路径(移除已执行的路径点)
+        if len(self.current_path) > 1:
+            self.current_path = self.current_path[1:]
+
         self._execute_move(hwnd, direction, "执行缓存方向", now)
         self.last_execute_time = now
 
@@ -576,23 +600,19 @@ class SnakePlayer(QObject):
                     if len(self.predicted_body_positions) > 5:
                         self.predicted_body_positions.pop()
         
-        # # 无论是否观察到蛇头，都进行预测
-        # if self._can_predict_head():
-        #     predicted_pos = self._calculate_predicted_position()
-        #     if predicted_pos:
-        #         self.predicted_head_pos = predicted_pos
-        #         # 使用预测位置更新棋盘
-        #         self._update_board_with_predicted_head(board, predicted_pos)
-        #         # 更新预测蛇身到棋盘
-        #         self._update_board_with_predicted_body(board)
+        # 无论是否观察到蛇头，都进行预测
+        if self._can_predict_head():
+            predicted_pos = self._calculate_predicted_position()
+            if predicted_pos:
+                self.predicted_head_pos = predicted_pos
+                # 使用预测位置更新棋盘
+                self._update_board_with_predicted_head(board, predicted_pos)
+                # 更新预测蛇身到棋盘
+                self._update_board_with_predicted_body(board)
                 
-        # # 预测后检测是否需要缓存未来5步方向
-        # if self._should_cache_future_moves(board):
-        #     self._cache_future_directions()
-
-        # # 只在缓存方向不为空时执行
-        # if len(self.cached_directions) > 0:
-        #     self._execute_cached_directions(self.last_hwnd)
+        # 预测后检测是否需要缓存未来5步方向
+        if self._should_cache_future_moves(board):
+            self._cache_future_directions()
 
     def _should_cache_future_moves(self, board: Board) -> bool:
         """检测是否需要缓存未来5步方向"""
@@ -722,7 +742,7 @@ class SnakePlayer(QObject):
 
     def _try_escape_path(self) -> "list|None":
         """尝试逃生路径"""
-        escape_path = self.path_finder.find_path_to_nearest_empty(self.board)
+        escape_path = self.path_finder.find_path_to_nearest(self.board)
         if escape_path and len(escape_path) > 1:
             return self._update_path_and_emit(escape_path)
         return None
