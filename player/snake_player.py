@@ -5,9 +5,9 @@ import win32gui
 from PyQt5.QtCore import QObject, pyqtSignal, pyqtSlot
 import mss
 import gc
-from analyzer.board_analyzer import BoardAnalyzer
+from analyzer.board.board_analyzer import BoardAnalyzer
 from model.snake_board import Board
-from analyzer.path_finder import PathFinder
+from analyzer.path.path_finder import PathFinder
 from controller.snake_controller import SnakeController
 from log.debug_helper import DebugHelper
 
@@ -65,7 +65,6 @@ class SnakePlayer(QObject):
         self.predicted_body_positions = []  # 预测的蛇身位置列表(最多保持5格)
 
         # 画面捕获相关
-        self.sct = mss.mss()
         self.last_window_hwnd = None
         self.last_window_rect = None
         self.cache_images = [None] * self.CACHE_SIZE

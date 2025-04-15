@@ -20,9 +20,9 @@ from qfluentwidgets import (
 )
 from log.log import SnakeLogger
 from model.snake_board import Board
-from analyzer.board_analyzer import BoardAnalyzer
+from analyzer.board.board_analyzer import BoardAnalyzer
 from drawer.map_drawer import MapDrawer
-from analyzer.path_finder import PathFinder
+from analyzer.path.path_finder import PathFinder
 from PyQt5.QtWidgets import QSizePolicy
 
 
