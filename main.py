@@ -5,6 +5,7 @@ from PyQt5.QtWidgets import QApplication
 from PyQt5.QtCore import QThread, pyqtSignal
 from mainwindow import MainWindow
 from player.snake_player import SnakePlayer
+from player.module.screen_capture_thread import ScreenCaptureThread
 import time
 import cv2
 
@@ -20,6 +21,11 @@ class SnakePlayerThread(QThread):
         self.snake_player = SnakePlayer(logger)
         self.running = False
         self.hwnd = None
+        self.processing = False  # 标记是否正在处理帧
+
+        # 创建截图线程
+        self.capture_thread = ScreenCaptureThread(logger)
+        self.capture_thread.capture_completed.connect(self.on_capture_completed)
 
         # 连接信号
         self.snake_player.board_updated.connect(self.board_updated)
@@ -27,13 +33,14 @@ class SnakePlayerThread(QThread):
     def set_hwnd(self, hwnd):
         """设置游戏窗口句柄"""
         self.hwnd = hwnd
+        self.capture_thread.set_hwnd(hwnd)
 
     def run(self):
         """线程运行函数"""
         self.running = True
-        error_count = 0  # 添加错误计数器
-        while self.running and not self.isInterruptionRequested():
+        self.capture_thread.start()  # 启动截图线程
 
+        while self.running and not self.isInterruptionRequested():
             try:
                 if not self.hwnd:
                     if self.snake_player.logger:
@@ -41,42 +48,46 @@ class SnakePlayerThread(QThread):
                     self.msleep(1000)  # 等待窗口时降低检查频率
                     continue
 
-                # 捕获屏幕
-                capture_start = time.time()
-                self.snake_player.test_time = time.time()
-                screen_cv = self.snake_player.capture_screen(self.hwnd)
-                capture_time = time.time() - capture_start
-                # print(f"截图用时: {capture_time*1000:.1f}ms")
+                # 获取最新帧
+                frame_data = self.capture_thread.get_latest_frame()
+                if frame_data is None:
+                    self.msleep(1)  # 等待新帧
+                    continue
 
-                if screen_cv is None:
-                    error_count += 1
-                    if error_count >= 3 and self.snake_player.logger:
-                        self.snake_player.logger.log(
-                            "画面捕获失败，请检查游戏窗口是否正常"
-                        )
-                        error_count = 0
-                    self.msleep(500)
+                hwnd, screen_cv = frame_data
+                if hwnd != self.hwnd:  # 窗口已改变，跳过此帧
+                    continue
+
+                if self.processing:  # 如果还在处理上一帧，跳过此帧
                     continue
 
                 # 处理帧
-                error_count = 0
+                self.processing = True
                 process_start = time.time()
+                self.snake_player.test_time = time.time()
                 self.snake_player.process_frame(screen_cv, self.hwnd)
                 process_time = time.time() - process_start
+                self.processing = False
                 # print(f"处理用时: {process_time*1000:.1f}ms")
 
             except Exception as e:
                 if self.snake_player.logger:
                     self.snake_player.logger.log(f"线程运行错误: {str(e)}")
                 self.msleep(1000)  # 发生错误时降低重试频率
+                self.processing = False
                 continue
 
             # 控制帧率
-            self.msleep(1)  # 约20帧每秒
+            self.msleep(1)  # 约1000fps
+
+    def on_capture_completed(self, hwnd, screen_cv):
+        """截图完成回调"""
+        pass  # 可以在这里添加额外的处理逻辑
 
     def stop(self):
         """停止线程"""
         self.running = False
+        self.capture_thread.stop()
         self.wait()
 
 

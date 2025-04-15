@@ -66,27 +66,45 @@ class BoardAnalyzerTestCard(QWidget):
         super().__init__()
         self.setObjectName("subInterface_board_analyzer")
         self.setWindowTitle("棋盘分析测试")
-        self.resize(500, 1000)
+        self.resize(1000, 800)  # 调整窗口大小
 
+        # 主布局改为水平布局
+        main_layout = QHBoxLayout(self)
+        main_layout.setContentsMargins(20, 20, 20, 20)
+        main_layout.setSpacing(20)
+
+        # 左侧图像区域
+        left_layout = QVBoxLayout()
+        left_layout.setSpacing(20)
+        
         self.title = QLabel("棋盘识别与路径测试")
         self.title.setAlignment(Qt.AlignCenter)
+        left_layout.addWidget(self.title)
 
         self.image_card = ImageCard()
+        left_layout.addWidget(self.image_card)
 
+        # 右侧日志区域
+        right_layout = QVBoxLayout()
+        right_layout.setSpacing(20)
+
+        # 日志标签
+        log_label = QLabel("分析日志")
+        log_label.setAlignment(Qt.AlignCenter)
+        right_layout.addWidget(log_label)
+
+        # 日志文本框
         self.info_label = TextEdit()
         self.info_label.setReadOnly(True)
-        self.info_label.setMinimumHeight(100)
-        self.info_label.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
-        self.info_label.setStyleSheet(
-            """
-            TextEdit {
-                border: 1px solid #ccc;
-                border-radius: 8px;
-                background-color: transparent;
-            }
-        """
-        )
+        self.info_label.setMinimumHeight(400)  # 增加高度
+        right_layout.addWidget(self.info_label)
 
+        # 将左右布局添加到主布局
+        main_layout.addLayout(left_layout, stretch=2)  # 图像区域占2份
+        main_layout.addLayout(right_layout, stretch=1)  # 日志区域占1份
+
+        # 按钮布局保持不变
+        button_layout = QHBoxLayout()
         self.open_button = PrimaryPushButton("打开图像")
         self.open_button.clicked.connect(self.open_image)
 
@@ -96,14 +114,12 @@ class BoardAnalyzerTestCard(QWidget):
         self.current_direction_index = -1
         self.current_direction = None
 
-        # 新增检测蛇眼按钮
         self.detect_eye_button = PrimaryPushButton("检测蛇眼")
         self.detect_eye_button.clicked.connect(self.detect_snake_eye_show)
 
         self.path_finding_switch = SwitchButton("开启寻路")
         self.path_finding_switch.setChecked(True)
 
-        # 新增HSV容差输入框和过滤区域按钮
         self.filter_button = PrimaryPushButton("过滤区域")
         self.filter_button.setIcon(FluentIcon.FILTER)
         self.filter_button.clicked.connect(self.filter_hsv_mask)
@@ -123,21 +139,14 @@ class BoardAnalyzerTestCard(QWidget):
         hsv_layout.addWidget(self.s_range_input)
         hsv_layout.addWidget(self.v_range_input)
 
-        # 按钮横向布局
-        button_layout = QHBoxLayout()
         button_layout.addWidget(self.open_button)
         button_layout.addWidget(self.direction_button)
         button_layout.addWidget(self.detect_eye_button)
 
-        layout = QVBoxLayout(self)
-        layout.setContentsMargins(20, 20, 20, 20)
-        layout.setSpacing(20)
-        layout.addWidget(self.title)
-        layout.addWidget(self.image_card)
-        layout.addWidget(self.info_label)
-        layout.addLayout(button_layout)  # 用横向按钮替换
-        layout.addWidget(self.path_finding_switch, alignment=Qt.AlignCenter)
-        layout.addLayout(hsv_layout)
+        # 将按钮布局添加到左侧布局底部
+        left_layout.addLayout(button_layout)
+        left_layout.addWidget(self.path_finding_switch, alignment=Qt.AlignCenter)
+        left_layout.addLayout(hsv_layout)
 
         self.logger = SnakeLogger(self.info_label)
         self.analyzer = BoardAnalyzer(self.logger)

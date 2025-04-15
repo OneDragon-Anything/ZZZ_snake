@@ -90,8 +90,10 @@ class ColorAnalyzer:
         if not color_dict:
             return cell.cell_type
 
+        # 过滤掉出现次数少于26的颜色
+        filtered_colors = {k:v for k,v in color_dict.items() if v >= 26}
         # 按颜色出现频率从高到低排序
-        sorted_colors = sorted(color_dict.items(), key=lambda x: x[1], reverse=True)
+        sorted_colors = sorted(filtered_colors.items(), key=lambda x: x[1], reverse=True)
 
         # 遍历所有颜色，找到第一个确定的类型
         for h_value, count in sorted_colors:
@@ -106,142 +108,6 @@ class ColorAnalyzer:
 
         # 如果所有颜色都是empty或unknown，保持原状
         return cell.cell_type
-
-    def analyze_color_move_direction(
-        self,
-        hsv_image,
-        target_hsv=None,
-        tolerance=[5, 255, 50],
-        multi_frame=True,
-        preset_direction=None,
-    ):
-        """根据颜色检测蛇头位置，并判断蛇头方向
-
-        参数：
-            hsv_image: HSV格式的图像
-            target_hsv: list型，目标HSV颜色均值。例如[4,213,255], 默认为self.own_head色调
-            tolerance: list型，HSV阈值上界范围，默认[5,50,50]
-            multi_frame: bool，是否利用"上一帧"计算运动方向。默认True
-            preset_direction: str，指定蛇头方向('up','down','left','right'或'none')，若提供则不进行多帧分析，直接使用
-
-        返回：
-            (方向字符串, 当前中心坐标元组, 蛇头边缘关键点坐标)
-            如果检测失败，返回None
-        """
-        h_tol, s_tol, v_tol = tolerance
-        if target_hsv is None:
-            target_hsv = [self.own_head, 0, 0]
-
-        target_h, target_s, target_v = target_hsv
-
-        lower_hsv = np.array(
-            [
-                max(0, target_h - h_tol),
-                max(0, target_s - s_tol),
-                max(0, target_v - v_tol),
-            ]
-        )
-        upper_hsv = np.array(
-            [
-                min(179, target_h + h_tol),
-                min(255, target_s + s_tol),
-                min(255, target_v + v_tol),
-            ]
-        )
-
-        current_mask = cv2.inRange(hsv_image, lower_hsv, upper_hsv)
-        current_contours, _ = cv2.findContours(
-            current_mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE
-        )
-
-        if not current_contours:
-            return None
-
-        max_contour = max(current_contours, key=cv2.contourArea)
-        M = cv2.moments(max_contour)
-
-        if M["m00"] == 0:
-            return None
-
-        current_cx = int(M["m10"] / M["m00"])
-        current_cy = int(M["m01"] / M["m00"])
-
-        edge_point = (current_cx, current_cy)
-
-        contour_points = max_contour.reshape(-1, 2)
-
-        if preset_direction is not None:
-            if preset_direction == "all":
-                edge_points = {}
-                edge_points["right"] = tuple(
-                    contour_points[np.argmax(contour_points[:, 0])]
-                )
-                edge_points["left"] = tuple(
-                    contour_points[np.argmin(contour_points[:, 0])]
-                )
-                edge_points["down"] = tuple(
-                    contour_points[np.argmax(contour_points[:, 1])]
-                )
-                edge_points["up"] = tuple(
-                    contour_points[np.argmin(contour_points[:, 1])]
-                )
-                return ("all", (current_cx, current_cy), edge_points)
-            else:
-                direction = preset_direction
-                if direction == "right":
-                    edge_point = tuple(contour_points[np.argmax(contour_points[:, 0])])
-                elif direction == "left":
-                    edge_point = tuple(contour_points[np.argmin(contour_points[:, 0])])
-                elif direction == "down":
-                    edge_point = tuple(contour_points[np.argmax(contour_points[:, 1])])
-                elif direction == "up":
-                    edge_point = tuple(contour_points[np.argmin(contour_points[:, 1])])
-                else:
-                    edge_point = (current_cx, current_cy)
-                return (direction, (current_cx, current_cy), edge_point)
-
-        if not multi_frame or self.last_frame is None:
-            direction = "none"
-            return (direction, (current_cx, current_cy), edge_point)
-
-        last_mask = cv2.inRange(self.last_frame, lower_hsv, upper_hsv)
-        last_contours, _ = cv2.findContours(
-            last_mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE
-        )
-
-        if not last_contours:
-            return ("none", (current_cx, current_cy), (current_cx, current_cy))
-
-        last_max_contour = max(last_contours, key=cv2.contourArea)
-        M_last = cv2.moments(last_max_contour)
-
-        if M_last["m00"] == 0:
-            return None
-
-        last_cx = int(M_last["m10"] / M_last["m00"])
-        last_cy = int(M_last["m01"] / M_last["m00"])
-
-        dx = current_cx - last_cx
-        dy = current_cy - last_cy
-
-        direction = None
-        if abs(dx) > abs(dy):
-            direction = "right" if dx > 0 else "left"
-        else:
-            direction = "down" if dy > 0 else "up"
-
-        if direction == "right":
-            edge_point = tuple(contour_points[np.argmax(contour_points[:, 0])])
-        elif direction == "left":
-            edge_point = tuple(contour_points[np.argmin(contour_points[:, 0])])
-        elif direction == "down":
-            edge_point = tuple(contour_points[np.argmax(contour_points[:, 1])])
-        elif direction == "up":
-            edge_point = tuple(contour_points[np.argmin(contour_points[:, 1])])
-        else:
-            edge_point = (current_cx, current_cy)
-
-        return (direction, (current_cx, current_cy), edge_point)
 
     def find_snake_eye(self, hsv_image):
         """在整张图像中寻找纯白色蛇眼区域，返回蛇眼中心坐标列表 [(x1,y1),(x2,y2),...]"""

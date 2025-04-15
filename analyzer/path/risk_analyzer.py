@@ -3,9 +3,13 @@ import numpy as np
 class RiskAnalyzer:
     """风险区域分析器，负责计算和管理网格中的风险区域"""
     
+    # 风险系数常量
+    HIGH_RISK = 81      # 高风险：敌方蛇头、地图边缘等
+    MEDIUM_RISK = 9     # 中风险：敌方蛇身、地图外边缘等 
+    LOW_RISK = 1        # 低风险：自己蛇身等
+    
     def __init__(self, grid_height, grid_width):
         """初始化风险分析器
-        
         Args:
             grid_height: 网格高度
             grid_width: 网格宽度
@@ -18,7 +22,7 @@ class RiskAnalyzer:
         self.directions = np.array([(0, -1), (0, 1), (-1, 0), (1, 0)], dtype=np.int32)
         # 兼容性字典
         self.risk_scores = {}
-        
+
     def update_risk_areas(self, board):
         """更新风险区域
         
@@ -33,18 +37,18 @@ class RiskAnalyzer:
         
         # === 使用NumPy向量化操作标记地图边缘为高风险 ===
         # 上下边缘
-        self.risk_array[1, 1:self.grid_width+1] += 9  # 上边缘
-        self.risk_array[self.grid_height, 1:self.grid_width+1] += 9  # 下边缘
+        self.risk_array[1, 1:self.grid_width+1] += self.HIGH_RISK  # 上边缘
+        self.risk_array[self.grid_height, 1:self.grid_width+1] += self.HIGH_RISK  # 下边缘
         # 左右边缘
-        self.risk_array[1:self.grid_height+1, 1] += 9  # 左边缘
-        self.risk_array[1:self.grid_height+1, self.grid_width] += 9  # 右边缘
+        self.risk_array[1:self.grid_height+1, 1] += self.HIGH_RISK  # 左边缘
+        self.risk_array[1:self.grid_height+1, self.grid_width] += self.HIGH_RISK  # 右边缘
         
         # === 标记地图边缘外一格为中风险 ===
         # 外部边缘
-        self.risk_array[0, :] += 3  # 上外边缘
-        self.risk_array[self.grid_height+1, :] += 3  # 下外边缘
-        self.risk_array[:, 0] += 3  # 左外边缘
-        self.risk_array[:, self.grid_width+1] += 3  # 右外边缘
+        self.risk_array[0, :] += self.MEDIUM_RISK  # 上外边缘
+        self.risk_array[self.grid_height+1, :] += self.MEDIUM_RISK  # 下外边缘
+        self.risk_array[:, 0] += self.MEDIUM_RISK  # 左外边缘
+        self.risk_array[:, self.grid_width+1] += self.MEDIUM_RISK  # 右外边缘
         
         # 处理特殊单元格
         self._process_special_cells(board)
@@ -53,12 +57,8 @@ class RiskAnalyzer:
         self._sync_to_dict()
     
     def _process_special_cells(self, board):
-        """处理特殊单元格的风险值
+        """处理特殊单元格的风险值"""
         
-        Args:
-            board: 棋盘对象
-        """
-        # 预处理特殊单元格坐标
         def process_cells(cell_type, risk_value):
             if cell_type in board.special_cells:
                 cells = board.special_cells[cell_type]
@@ -86,14 +86,14 @@ class RiskAnalyzer:
         
         # 处理高风险区域 - 敌方蛇头、地雷等周围
         for key in ["enemy_head", "mine", "unknown"]:
-            process_cells(key, 9)
+            process_cells(key, self.HIGH_RISK)
             
         # 处理中风险区域 - 敌方蛇身周围
-        process_cells("enemy_body", 3)
+        process_cells("enemy_body", self.MEDIUM_RISK)
         
         # 处理低风险区域 - 自己蛇身周围
         for key in ["own_body", "greed_speed"]:
-            process_cells(key, 1)
+            process_cells(key, self.LOW_RISK)
     
     def _sync_to_dict(self):
         """将风险数组同步到字典中以保持兼容性"""

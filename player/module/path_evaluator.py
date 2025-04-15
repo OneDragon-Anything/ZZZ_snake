@@ -45,16 +45,12 @@ class PathEvaluator(LoggingMixin):
         path_calc_start = time.time()
         try:
             # 获取目标点
-            print(f"[寻找新路径] 特殊格列表: {board.special_cells.keys()}")
             target_cells = board.special_cells.get("score_boost", [])
             if not target_cells:
                 self.log_debug("未找到得分点，使用默认目标")
                 # 如果没有得分点，使用默认目标（棋盘中心）
-                print(f"[准备寻找默认目标] 特殊格列表: {board.special_cells.keys()}")
                 self.current_path = self._find_path_to_center(board)
             else:
-                # 找到最近的得分点
-                print(f"[准备寻找得分点] 特殊格列表: {board.special_cells.keys()}")
                 self.current_path = self._find_path_to_nearest_target(board, target_cells)
             
             self.last_path_calc_time = current_time
@@ -72,7 +68,6 @@ class PathEvaluator(LoggingMixin):
         """
         center_x = self.BOARD_WIDTH // 2
         center_y = self.BOARD_HEIGHT // 2
-        print(f"[寻找默认目标] 特殊格列表: {board.special_cells.keys()}")
         # 修正参数顺序：start, target, board
         return self.path_finder.find_path(board.head_position, (center_x, center_y), board)
     
@@ -83,7 +78,6 @@ class PathEvaluator(LoggingMixin):
         if not target_cells:
             return []
         
-        print(f"[寻找到最近目标的路径] 特殊格列表: {board.special_cells.keys()}")
 
         # 获取所有目标点的坐标
         targets = [(cell.col, cell.row) for cell in target_cells]

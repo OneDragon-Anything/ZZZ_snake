@@ -21,6 +21,7 @@ class SnakeController:
         self.hwnd = hwnd
 
     def control_snake(self, direction):
+
         if not direction:
             # 松开所有方向键
             for key in ["w", "s", "a", "d"]:

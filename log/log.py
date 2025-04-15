@@ -24,6 +24,8 @@ class SnakeLogger:
         self.update_timer = QTimer()
         self.update_timer.timeout.connect(self._flush_buffer)
         self.update_timer.start(update_interval)  # 每100ms更新一次
+        self.last_message = None  # 记录上一条消息
+        self.repeat_count = 0     # 重复次数计数器
 
     def _append_text(self, html: str):
         self.log_buffer.append(html)
@@ -64,8 +66,26 @@ class SnakeLogger:
         print(log_message)
 
     def _log_with_level(self, message: str, level: str, timestamp: str, color: str):
+        if message == self.last_message:
+            self.repeat_count += 1
+            # 更新最后一条日志显示重复次数
+            if self.log_buffer and self.text_browser:
+                last_msg = self.log_buffer[-1]
+                if "(repeated" in last_msg:
+                    # 更新已有的重复计数
+                    new_msg = last_msg.split("(repeated")[0] + f"(repeated {self.repeat_count})</span><br>"
+                    self.log_buffer[-1] = new_msg
+                else:
+                    # 添加重复计数
+                    new_msg = last_msg.replace("</span><br>", f" (repeated {self.repeat_count})</span><br>")
+                    self.log_buffer[-1] = new_msg
+            return
+            
+        # 处理新的消息
+        self.repeat_count = 0
+        self.last_message = message
         log_message = f"[{timestamp}] [{level}] {message}"
-        html_msg = f'<span style="color:{color};">{log_message}</span><br>'  # 加上<br>让每条独占一行
+        html_msg = f'<span style="color:{color};">{log_message}</span><br>'
         self._append_text(html_msg)
 
     def debug(self, message: str):

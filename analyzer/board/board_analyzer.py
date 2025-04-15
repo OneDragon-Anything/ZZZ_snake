@@ -72,44 +72,43 @@ class BoardAnalyzer:
         # 进行前后帧分析
         self._analyze_frame_changes(board_image)
 
-        # 检测蛇头状态
-        if "own_head" not in self.special_cells:
+        # 清理空列表
+        self.special_cells = {k: v for k, v in self.special_cells.items() if v}
+
+        # 检查未知格子数量
+        unknown_count = len(self.special_cells.get("unknown", []))
+        if unknown_count > 10:
             self.is_running = False
             self.head_position = None
             self.head_direction = None
             self.last_frame = None
+            return board
         else:
-            # 设置运行状态
             self.is_running = True
 
-        # 清理空列表
-        self.special_cells = {k: v for k, v in self.special_cells.items() if v}
-
-        # 更新棋盘对象
-        board.special_cells = self.special_cells
-        board.head_position = self.head_position
-        board.direction = self.head_direction
-        
-        if self.logger:
-            self.logger.debug(f"棋盘分析耗时: {time.time() - start_time:.3f}秒")
+            # 更新棋盘对象
+            board.special_cells = self.special_cells
+            board.head_position = self.head_position
+            board.direction = self.head_direction
             
-        return board
+            return board
 
     def _check_gameover_status(self):
         """检查游戏是否结束"""
         current_time = time.time()
-        if current_time - self.last_gameover_check >= 10:
-            gameover_result = self.color_analyzer.analyze_color_move_direction(
-                self.board.hsv_image,
-                [self.game_over, 0, 0],
-                [0, 255, 255],
-            )
-            # 检查坐标是否在474,426正负5像素范围内
-            if gameover_result:
-                _, (cx, cy), _ = gameover_result
-                if 469 <= cx <= 479 and 421 <= cy <= 431:
-                    self.is_gameover = True
-                    return
+        if current_time - self.last_gameover_check >= 3:
+            # 将棋盘转换为NumPy数组
+            cells = np.array(self.board.cells)
+            
+            # 提取所有格子的H值
+            h_values = np.array([[cell.center_color[0] for cell in row] for row in cells])
+            
+            # 向量化计算gameover色匹配的格子数量
+            gameover_count = np.sum(np.abs(h_values - self.game_over) <= 1)
+            
+            if 88 <= gameover_count <= 92:
+                self.is_gameover = True
+                return
 
             self.last_gameover_check = current_time
             self.is_gameover = False
@@ -145,6 +144,7 @@ class BoardAnalyzer:
         self._inherit_previous_frame_info()
         
         # 模板匹配识别特殊元素
+        
         self._analyze_by_templates()
 
         # 向量化处理空白和未知格子的类型判断
@@ -207,109 +207,231 @@ class BoardAnalyzer:
             base_cell = self.board.get_cell_by_position(avg_x, avg_y)
             
             if base_cell:
-                self._determine_head_cell(base_cell)
+                head_cell = self._determine_head_cell(base_cell)
+                # self._deep_analysis_head_neighbors(head_cell)
         else:
             self.head_position = None  # 无缓存也没有新识别，置空
 
         # 确定蛇尾
         self._determine_own_tail()
+
+        # 确定敌人蛇,暂不需要
+        # self._determine_enemy_snake()
         
         # 更新上一帧
         self.color_analyzer.update_last_frame(current_frame)
         self.last_frame = current_frame
 
     def _determine_head_cell(self, base_cell):
-        """确定蛇头所在的格子"""
+        """优化后的蛇头格子确定方法"""
         head_x, head_y = base_cell.col, base_cell.row
-        best_cell = None  # 最佳格
-        max_count = 0  # 合法最大计数
+        best_cell = None
+        max_count = 0
         
-        # 检查周围8个格子
-        for dx in [-1, 0, 1]:
-            for dy in [-1, 0, 1]:
-                if dx == 0 and dy == 0:
-                    continue  # 跳过中心点(蛇头本身)
-                nx, ny = head_x + dx, head_y + dy
-                if 0 <= nx < self.board.cols and 0 <= ny < self.board.rows:
-                    neighbor = self.board.cells[ny][nx]
-                    if neighbor.cell_type == "empty":
-                        self.color_analyzer.deep_analysis_cell(neighbor, self.board.hsv_image)
-                        color_dict = neighbor.get_color_dict(self.board.hsv_image)
-                        has_head_color = any(
-                            self.color_analyzer.own_head <= int(h_value) <= self.color_analyzer.own_body
-                            for h_value in color_dict.keys()
-                        )
-                        if has_head_color:
-                            count = sum(
-                                cnt
-                                for h_value, cnt in color_dict.items()
-                                if self.color_analyzer.grid_light
-                                <= int(h_value)
-                                <= self.color_analyzer.grid_dark
-                            )
-                            if count > max_count:
-                                max_count = count
-                                best_cell = neighbor
+        # 预计算颜色范围
+        head_h_min = self.color_analyzer.own_head
+        head_h_max = self.color_analyzer.own_body
+        grid_h_min = self.color_analyzer.grid_light
+        grid_h_max = self.color_analyzer.grid_dark
 
-        # 确定最终的蛇头cell
-        head_cell = best_cell if best_cell else base_cell
+        # 检查周围4个格子
+        for dx, dy in [(-1,0), (0,-1), (0,1), (1,0)]:
+            nx, ny = head_x + dx, head_y + dy
+            if 0 <= nx < self.board.cols and 0 <= ny < self.board.rows:
+                neighbor = self.board.cells[ny][nx]
+                
+                # 只看空格
+                if not neighbor.cell_type in ["empty"]:
+                    continue
+                    
+                # 分析格子颜色
+                color_dict = neighbor.get_color_dict(self.board.hsv_image)
+                
+                # 快速统计匹配像素
+                head_count = 0
+                grid_count = 0
+                for h_value, cnt in color_dict.items():
+                    h_int = int(h_value)
+                    if head_h_min <= h_int <= head_h_max:
+                        head_count += cnt
+                    if grid_h_min <= h_int <= grid_h_max:
+                        grid_count += cnt
+                
+                # 只有当有蛇头颜色时才考虑
+                if head_count > 0 and grid_count > max_count:
+                    max_count = grid_count
+                    best_cell = neighbor
 
-        # 更新蛇头cell类型
+        # 确定最终蛇头格子
+        head_cell = best_cell if best_cell and max_count > 1 else base_cell
+        
+        # 更新格子类型
         self.remove_from_special_cells(head_cell.cell_type, head_cell)
         head_cell.cell_type = "own_head"
         self.add_to_special_cells("own_head", head_cell)
+        return head_cell
 
     def _determine_own_tail(self):
-        """找到蛇尾的格子"""
+        """简化版蛇尾检测算法"""
         if "own_body" not in self.special_cells:
             return None
 
-        result = self.color_analyzer.analyze_color_move_direction(
-            self.board.hsv_image,
-            [self.own_tail, 0, 255],
-            [0, 255, 50],
-            preset_direction="all"
-        )
-        if not result:
+        # 第一步：找出中心色最接近蛇尾的own_body格子
+        best_cell = None
+        min_diff = float('inf')
+        
+        for cell in self.special_cells["own_body"]:
+            # 直接使用中心色进行比较
+            h_value = cell.center_color[0]
+            diff = abs(int(h_value) - self.own_tail)
+            
+            if diff < min_diff:
+                min_diff = diff
+                best_cell = cell
+
+        if not best_cell:
             return None
 
-        _, _, edge_points = result
+        # 第二步：生成候选格子列表（包括自身和相邻格子）
+        candidates = []
+        x, y = best_cell.col, best_cell.row
+        
+        # 添加自身和四个相邻格子
+        candidates.append(best_cell)
+        for dx, dy in [(-1,0), (1,0), (0,-1), (0,1)]:
+            nx, ny = x + dx, y + dy
+            if 0 <= nx < self.board.cols and 0 <= ny < self.board.rows:
+                if self.board.cells[ny][nx].cell_type == "empty":
+                    candidates.append(self.board.cells[ny][nx])
 
-        candidate_cells = []
-        own_tail_scores = []
-
-        color_tolerance = 1  # 容差值
-
-        for key in ["left", "right", "up", "down"]:
-            point = edge_points.get(key)
-            if not point:
-                continue
-            cell = self.board.get_cell_by_position(point[0], point[1])
-            if not cell:
-                continue
+        # 筛选条件：有蛇尾颜色且有空格色
+        for cell in candidates:
             color_dict = cell.get_color_dict(self.board.hsv_image)
-            score = 0
-            if color_dict:
-                for h_value, cnt in color_dict.items():
-                    # 如果颜色在阈值范围内，计入得分
-                    if abs(int(h_value) - int(self.own_tail)) <= color_tolerance:
-                        score += cnt
-            if score > 0:
-                candidate_cells.append(cell)
-                own_tail_scores.append(score)
+            if not color_dict:
+                continue
+                
+            # 检查是否有蛇尾颜色
+            has_tail_color = any(abs(int(h) - self.own_tail) <= 1 for h in color_dict)
+            # 检查是否有空格色
+            has_grid_color = any(
+                self.color_analyzer.grid_light <= int(h) <= self.color_analyzer.grid_dark
+                for h in color_dict
+            )
+            
+            if has_tail_color and has_grid_color:
+                self._update_tail_cell(cell)
+                return cell
 
-        if not candidate_cells:
+        # 如果没有找到符合条件的格子，返回中心色最接近的格子
+        if best_cell:
+            self._update_tail_cell(best_cell)
+            return best_cell
+
+        return None
+
+    def _update_tail_cell(self, cell):
+        """更新格子为蛇尾的通用方法"""
+        self.remove_from_special_cells(cell.cell_type, cell)
+        cell.cell_type = "own_tail"
+        self.add_to_special_cells("own_tail", cell)
+
+    def _deep_analysis_head_neighbors(self, head_cell):
+        """深度分析蛇头周围3x3的空白格子"""
+        if not head_cell or not self.board:
+            return
+    
+        head_x, head_y = head_cell.col, head_cell.row
+        
+        # 检查3x3范围内的格子
+        for dx in [-1, 0, 1]:
+            for dy in [-1, 0, 1]:
+                # 跳过中心格子(蛇头本身)
+                if dx == 0 and dy == 0:
+                    continue
+                    
+                nx, ny = head_x + dx, head_y + dy
+                if 0 <= nx < self.board.cols and 0 <= ny < self.board.rows:
+                    neighbor = self.board.cells[ny][nx]
+                    
+                    # 只分析空白格子
+                    if neighbor.cell_type == "empty":
+                        # 深度分析该格子
+                        cell_type = self.color_analyzer.deep_analysis_cell(
+                            neighbor, 
+                            self.board.hsv_image
+                        )
+                        
+                        # 更新格子类型
+                        if cell_type != "empty":
+                            self.remove_from_special_cells(neighbor.cell_type, neighbor)
+                            neighbor.cell_type = cell_type
+                            self.add_to_special_cells(cell_type, neighbor)
+
+    def _determine_enemy_snake(self):
+        """处理敌方小蛇蛇头蛇尾"""
+        if "enemy_head" not in self.special_cells and "enemy_body" not in self.special_cells:
             return None
 
-        min_index = np.argmin(own_tail_scores)
-        tail_cell = candidate_cells[min_index]
+        # 1. 收集所有敌方蛇身和蛇头
+        enemy_cells = []
+        if "enemy_head" in self.special_cells:
+            enemy_cells.extend(self.special_cells["enemy_head"])
+        
+        if not enemy_cells:
+            return None
 
-        # 更新special_cells
-        self.remove_from_special_cells(tail_cell.cell_type, tail_cell)
-        tail_cell.cell_type = "own_tail"
-        self.add_to_special_cells("own_tail", tail_cell)
+        # 2. 分组敌方蛇身(基于连通性)
+        groups = self._group_enemy_cells(enemy_cells)
 
-        return tail_cell
+        # 3. 输出每组蛇头坐标
+        for i, group in enumerate(groups):
+            head_cells = [cell for cell in group if cell.cell_type == "enemy_head"]
+            if head_cells:
+                if self.logger:
+                    coords = [(cell.col+1, cell.row+1) for cell in head_cells]
+                    self.logger.debug(f"敌方蛇组{i+1} 蛇头坐标: {coords}")
+
+    def _group_enemy_cells(self, cells):
+        """基于连通性分组敌方蛇身"""
+        # 使用并查集算法分组
+        parent = {}
+        
+        def find(u):
+            while parent[u] != u:
+                parent[u] = parent[parent[u]]
+                u = parent[u]
+            return u
+            
+        def union(u, v):
+            u_root = find(u)
+            v_root = find(v)
+            if u_root == v_root:
+                return
+            parent[u_root] = v_root
+            
+        # 初始化并查集
+        for cell in cells:
+            parent[(cell.row, cell.col)] = (cell.row, cell.col)
+        
+        # 连接相邻的敌方格子
+        for cell in cells:
+            for dx, dy in [(-1,0), (1,0), (0,-1), (0,1)]:
+                nx, ny = cell.col + dx, cell.row + dy
+                if 0 <= nx < self.board.cols and 0 <= ny < self.board.rows:
+                    neighbor = self.board.cells[ny][nx]
+                    if neighbor in cells:
+                        union((cell.row, cell.col), (neighbor.row, neighbor.col))
+        
+        # 获取最终分组
+        groups = {}
+        for cell in cells:
+            root = find((cell.row, cell.col))
+            if root not in groups:
+                groups[root] = []
+            groups[root].append(cell)
+            
+        return list(groups.values())
+
 
     def add_to_special_cells(self, cell_type, cell):
         """将单元格添加到special_cells字典中，避免坐标重复

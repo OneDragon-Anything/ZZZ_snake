@@ -3,7 +3,7 @@ import numpy as np
 from pathlib import Path
 from model.template.template import Template
 from model.template.template_manage import TemplateManager
-
+import time
 
 class TemplateAnalyzer:
     """负责模板匹配分析的类，从BoardAnalyzer中分离出来"""
@@ -42,7 +42,7 @@ class TemplateAnalyzer:
             category = template_name
             if category in ["diamond", "yellow_crystal"]:
                 category = "score_boost"
-            
+            c_time = time.time()
             matches = self.template_manager.find_objects_by_features(
                 template, hsv_image=board.hsv_image
             )
@@ -50,6 +50,8 @@ class TemplateAnalyzer:
                 if category not in all_matches:
                     all_matches[category] = []
                 all_matches[category].extend(matches)
+
+        
 
         return all_matches
     

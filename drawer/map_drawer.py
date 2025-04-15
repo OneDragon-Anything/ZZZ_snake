@@ -86,20 +86,20 @@ class MapDrawer:
     def _draw_special_cells(self, screen_cv):
         """绘制所有非空格子并自动分配颜色"""
         color_map = {
-            "speed_boost": (55, 55, 55),  # 深灰色
-            "score_boost": (255, 165, 0),  # 橙色
-            "own_head": (0, 255, 0),  # 绿色
-            "own_body": (255, 255, 255),  # 白色
-            "own_tail": (255, 50, 50),  # 蓝色
-            "enemy_head": (0, 255, 255),  # 黄色
-            "enemy_body": (128, 0, 0),  # 深红色
-            "enemy_tail": (128, 128, 0),  # 橄榄色
-            "mine": (255, 0, 255),  # 紫色
-            "unknown": (0, 0, 0),  # 黑色
-            "predicted_head": (0, 128, 255),  # 橙色(预测蛇头)
-            "predicted_body": (0, 255, 255),  # 黄色(预测蛇身，高对比度)
+            "speed_boost": (0, 128, 255),    # 亮蓝色
+            "score_boost": (255, 100, 0),    # 橙红色
+            "own_head": (0, 255, 0),         # 绿色(保持)
+            "own_body": (255, 255, 255),     # 白色(保持)
+            "own_tail": (0, 200, 255),       # 天蓝色
+            "enemy_head": (255, 255, 0),     # 亮黄色
+            "enemy_body": (255, 0, 0),       # 纯红色
+            "enemy_tail": (255, 0, 100),     # 粉红色
+            "mine": (200, 0, 255),           # 亮紫色
+            "unknown": (0, 0, 0),            # 黑色(保持)
+            "predicted_head": (255, 128, 0), # 橙色(更鲜艳)
+            "predicted_body": (0, 255, 255), # 青色(保持)
             # 默认颜色
-            "default": (128, 128, 128),  # 灰色
+            "default": (100, 100, 100),      # 深灰色
         }
 
         # 绘制预测的蛇头位置
@@ -108,19 +108,21 @@ class MapDrawer:
             center = self.board.get_cell_center(y, x)
             if center:
                 center_x, center_y = center
-                # 使用橙色绘制预测蛇头，改为十字标记
+                # 改为真正的十字架形状
                 size = 10
+                # 水平线
                 cv2.line(
                     screen_cv,
-                    (center_x - size, center_y - size),
-                    (center_x + size, center_y + size),
+                    (center_x - size, center_y),
+                    (center_x + size, center_y),
                     (0, 128, 255),  # 橙色
                     3,
                 )
+                # 垂直线
                 cv2.line(
                     screen_cv,
-                    (center_x - size, center_y + size),
-                    (center_x + size, center_y - size),
+                    (center_x, center_y - size),
+                    (center_x, center_y + size),
                     (0, 128, 255),  # 橙色
                     3,
                 )
@@ -131,19 +133,21 @@ class MapDrawer:
                 center = self.board.get_cell_center(cell.row, cell.col)
                 if center:
                     center_x, center_y = center
-                    # 使用黄色绘制预测蛇身，使用十字标记
+                    # 改为真正的十字架形状
                     size = 10
+                    # 水平线
                     cv2.line(
                         screen_cv,
-                        (center_x - size, center_y - size),
-                        (center_x + size, center_y + size),
+                        (center_x - size, center_y),
+                        (center_x + size, center_y),
                         (0, 255, 255),  # 黄色
                         3,
                     )
+                    # 垂直线
                     cv2.line(
                         screen_cv,
-                        (center_x - size, center_y + size),
-                        (center_x + size, center_y - size),
+                        (center_x, center_y - size),
+                        (center_x, center_y + size),
                         (0, 255, 255),  # 黄色
                         3,
                     )

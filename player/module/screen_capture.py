@@ -3,9 +3,15 @@ import numpy as np
 import win32gui
 import mss
 import threading
+import time
+import gc
 from player.module.logging_mixin import LoggingMixin
 
 class ScreenCapture(LoggingMixin):
+    # 常量定义
+    CACHE_SIZE = 5
+    CACHE_UPDATE_INTERVAL = 0.5
+
     def __init__(self, logger=None):
         super().__init__(logger)
         self.sct = None
@@ -13,11 +19,23 @@ class ScreenCapture(LoggingMixin):
         self.last_window_hwnd = None
         self.last_window_rect = None
         self.lock = threading.Lock()
+        
+        # 画面缓存相关
+        self.cache_images = [None] * self.CACHE_SIZE
+        self.cache_index = 0
+        self.last_cache_update_time = 0
 
     def __del__(self):
         with self.lock:
             if self.sct:
                 self.sct.close()
+        self.clear_cache()
+        gc.collect()
+
+    def clear_cache(self):
+        """清理图像缓存"""
+        for i in range(len(self.cache_images)):
+            self.cache_images[i] = None
 
     def _init_screen_capture(self) -> bool:
         current_thread_id = threading.get_ident()
@@ -55,7 +73,8 @@ class ScreenCapture(LoggingMixin):
             return None
 
         try:
-            if hwnd != self.last_window_hwnd and not self._update_window_rect(hwnd):
+            # 每次检测窗口大小变化
+            if not self._update_window_rect(hwnd):
                 return None
 
             if not self._init_screen_capture():
@@ -68,7 +87,9 @@ class ScreenCapture(LoggingMixin):
                 return None
 
             img = np.asarray(sct_img)
-            return cv2.cvtColor(img, cv2.COLOR_BGRA2BGR)
+            screen_cv = cv2.cvtColor(img, cv2.COLOR_BGRA2BGR)
+            self._update_image_cache(screen_cv)
+            return screen_cv
 
         except Exception as e:
             self.log_error(f"画面捕获错误: {str(e)}")
@@ -114,3 +135,17 @@ class ScreenCapture(LoggingMixin):
 
         except Exception:
             return False
+            
+    def _update_image_cache(self, screen_cv: "np.ndarray"):
+        """更新图像缓存"""
+        current_time = time.time()
+        if current_time - self.last_cache_update_time >= self.CACHE_UPDATE_INTERVAL:
+            if self.cache_images[self.cache_index] is not None:
+                self.cache_images[self.cache_index] = None
+            self.cache_images[self.cache_index] = screen_cv.copy()
+            self.cache_index = (self.cache_index + 1) % self.CACHE_SIZE
+            self.last_cache_update_time = current_time
+
+    def get_cached_images(self):
+        """获取缓存的图像列表"""
+        return self.cache_images

@@ -3,6 +3,7 @@ import cv2
 import numpy as np
 from pathlib import Path
 from .template import Template
+import time  
 
 
 class TemplateManager:
@@ -10,9 +11,6 @@ class TemplateManager:
         self.template_dir = Path(template_dir)
         self.template_dir.mkdir(exist_ok=True)
         self._hsv_cache = {}
-        self._use_opencl = cv2.ocl.haveOpenCL()
-        if self._use_opencl:
-            cv2.ocl.setUseOpenCL(True)
 
     def create_template(self, template):
         return template.save(self.template_dir)
@@ -139,37 +137,28 @@ class TemplateManager:
             dtype=np.uint8,
         )
 
-        if self._use_opencl:
-            # OpenCL路径优化
-            hsv = cv2.UMat(hsv_img) if not isinstance(hsv_img, cv2.UMat) else hsv_img
-            if hsv_ranges["h_lower"] > hsv_ranges["h_upper"]:
-                mask1 = cv2.inRange(
-                    hsv,
-                    np.array([0, *lower[1:]]),
-                    np.array([hsv_ranges["h_upper"], *upper[1:]]),
-                )
-                mask2 = cv2.inRange(
-                    hsv,
-                    np.array([hsv_ranges["h_lower"], *lower[1:]]),
-                    np.array([179, *upper[1:]]),
-                )
-                return cv2.bitwise_or(mask1, mask2).get()
-            return cv2.inRange(hsv, lower, upper).get()
+        # 缩小图像到1/4尺寸
+        small_hsv = cv2.resize(hsv_img, None, fx=0.5, fy=0.5, interpolation=cv2.INTER_NEAREST)
+
+        if hsv_ranges["h_lower"] > hsv_ranges["h_upper"]:
+            mask1 = cv2.inRange(
+                small_hsv,
+                np.array([0, *lower[1:]]),
+                np.array([hsv_ranges["h_upper"], *upper[1:]]),
+            )
+            mask2 = cv2.inRange(
+                small_hsv,
+                np.array([hsv_ranges["h_lower"], *lower[1:]]),
+                np.array([179, *upper[1:]]),
+            )
+            small_mask = cv2.bitwise_or(mask1, mask2)
         else:
-            # 普通路径优化
-            if hsv_ranges["h_lower"] > hsv_ranges["h_upper"]:
-                mask1 = cv2.inRange(
-                    hsv_img,
-                    np.array([0, *lower[1:]]),
-                    np.array([hsv_ranges["h_upper"], *upper[1:]]),
-                )
-                mask2 = cv2.inRange(
-                    hsv_img,
-                    np.array([hsv_ranges["h_lower"], *lower[1:]]),
-                    np.array([179, *upper[1:]]),
-                )
-                return cv2.bitwise_or(mask1, mask2)
-            return cv2.inRange(hsv_img, lower, upper)
+            small_mask = cv2.inRange(small_hsv, lower, upper)
+
+        
+
+        # 放大回原尺寸
+        return cv2.resize(small_mask, (hsv_img.shape[1], hsv_img.shape[0]), interpolation=cv2.INTER_NEAREST)
 
     def get_template_analysis(self, template):
         """获取模板分析结果，如果已缓存则直接返回"""

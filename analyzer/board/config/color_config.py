@@ -20,7 +20,7 @@ class ColorConfig:
         "enemy4_body_tail": [157, 152, 255],
         "grid_light": [88, 80, 236],
         "grid_dark": [97, 251, 203],
-        "game_over": [109, 195, 88],
+        "game_over": [109, 191, 88],
     }
     
     @classmethod

@@ -179,12 +179,12 @@ class SnakeGameCard(QFrame):
         """
         if not (
             self.snake_player_thread
-            and hasattr(self.snake_player_thread.snake_player, "cache_images")
+            and hasattr(self.snake_player_thread.capture_thread.screen_capture, "get_cached_images")
         ):
             self.logger.warning("无缓存数组，无法保存")
             return
 
-        cached_images = self.snake_player_thread.snake_player.cache_images
+        cached_images = self.snake_player_thread.capture_thread.screen_capture.get_cached_images()
         saved_count = 0
         for idx, img in enumerate(cached_images):
             if img is not None:

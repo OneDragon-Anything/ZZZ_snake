@@ -99,9 +99,6 @@ class PathFinder(QObject):
             )
         t1 = time.time()
         
-        if self.logger and path:
-            self.logger.debug(f"[寻路] 方法:{method} 耗时:{(t1-t0)*1000:.1f}ms 路径长度:{len(path)}")
-
         return path
 
     def find_path_to_score_boost(self, board, direction=None):
